@@ -1,39 +1,150 @@
-import { promises as fs } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { promises as fs, constants } from 'node:fs';
+import { join, dirname, resolve, parse, sep } from 'node:path';
+import { isSecretName } from '../core/routing.js';
 import { randomUUID } from 'node:crypto';
 import { invariant, errorCode, RerouteError } from '../core/errors.js';
 import { atomicWrite, hash, readJSON, writeJSON, safePath, safeRelative, privateDir } from '../platform/files.js';
 // Legacy state must stay private even before users finish the rename migration.
 const EXCLUDED = new Set(['.git', '.reroute', '.reroute-runtime', '.outboard', '.outboard-runtime', 'node_modules', 'target', '.venv', 'venv', 'dist', 'build', '.next', '.nuxt', '.turbo', 'coverage', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.gradle', '.idea', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.npm', '.rustup', '.claude', '.codex', '.cursor', '.pi', '.omp', '.dsh', 'gcloud']);
 const SECRET_FILES = new Set(['.npmrc', '.pypirc', '.netrc', '.git-credentials', 'credentials', 'credentials.json', 'secrets.json', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'service-account.json', 'application_default_credentials.json', '.modal.toml', 'auth.json']);
-function glob(pattern) { return new RegExp('^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$'); }
-export function excluded(path, policy) {
+// A basename pattern matches at any depth; path patterns match from the root, including ancestors.
+export function validSyncPattern(value) {
+    if (typeof value !== 'string' || !value || /[\[\]{}!\\\x00-\x1f\x7f]/.test(value) || /[?*+@]\(/.test(value) || value.includes('..') || value.startsWith('/'))
+        return false;
+    const parts = value.replace(/\/$/, '').split('/');
+    return parts.every(p => p !== '' && p !== '.' && (!p.includes('**') || p === '**'));
+}
+function glob(pattern) {
+    invariant(validSyncPattern(pattern), 'CONFIG', 'Unsupported sync pattern; use literals, *, ?, or a complete ** path segment');
+    const parts = pattern.replace(/\/$/, '').split('/');
+    const source = parts.map((part, i) => part === '**' ? (i === parts.length - 1 ? '[\\s\\S]*' : '(?:[^/]+/)*') : part.replace(/[.+^$()|]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]') + (i < parts.length - 1 ? '/' : '')).join('');
+    return new RegExp('^' + source + '$(?![\\s\\S])', 'u');
+}
+function exclusion(path, policy) {
     const parts = path.split('/');
-    if (parts.some(p => EXCLUDED.has(p) || SECRET_FILES.has(p) || p.startsWith('.reroute-tmp-') || p === '.env' || p.startsWith('.env.') || /\.(pem|key|p12|pfx|keystore)$/i.test(p)))
-        return true;
-    return policy.excludes.some(p => glob(p).test(path) || parts.some(segment => glob(p).test(segment)));
+    if (parts.some(p => SECRET_FILES.has(p) || p === '.env' || p.startsWith('.env.') || /\.(pem|key|p12|pfx|keystore)$/i.test(p)))
+        return { reason: 'minimum-security' };
+    if (parts.some(p => EXCLUDED.has(p) || p.startsWith('.reroute-tmp-')))
+        return { reason: 'minimum-exclusion' };
+    for (const pattern of policy.excludes) {
+        const matcher = glob(pattern), normalized = pattern.replace(/\/$/, '');
+        const candidates = normalized.includes('/') ? parts.map((_, i) => parts.slice(0, i + 1).join('/')) : parts;
+        if (candidates.some(p => matcher.test(p)))
+            return { reason: 'policy-exclusion', pattern };
+    }
+    return undefined;
+}
+export function excluded(path, policy) { return exclusion(path, policy) !== undefined; }
+function validatePolicy(policy) {
+    invariant(Array.isArray(policy.excludes) && policy.excludes.every(validSyncPattern), 'CONFIG', 'Unsupported sync pattern; use literals, *, ?, or a complete ** path segment');
+    invariant(Number.isSafeInteger(policy.maxFiles) && policy.maxFiles > 0 && Number.isSafeInteger(policy.maxFileBytes) && policy.maxFileBytes > 0, 'CONFIG', 'Sync limits must be positive safe integers');
+}
+/** Shared traversal prunes excluded directories before looking inside them. */
+async function walkLocal(root, policy, visit, failed) {
+    const attempt = async (rel, action) => {
+        try {
+            await action();
+        }
+        catch (error) {
+            if (!failed)
+                throw error;
+            failed(rel, error);
+        }
+    };
+    async function walk(dir, prefix) {
+        await fs.access(dir, constants.R_OK | constants.X_OK);
+        for (const entry of (await fs.readdir(dir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+            const rel = prefix + entry.name, reason = exclusion(rel, policy);
+            await attempt(rel, async () => {
+                await visit(rel, entry, reason);
+                if (!reason && entry.isDirectory())
+                    await walk(await safePath(root, rel), rel + '/');
+            });
+        }
+    }
+    await attempt('.', async () => {
+        validatePolicy(policy);
+        root = resolve(root);
+        // Check ancestors in order, without resolving any link target or enumerating it.
+        let ancestor = parse(root).root;
+        for (const part of root.slice(ancestor.length).split(sep).filter(Boolean)) {
+            ancestor = join(ancestor, part);
+            invariant(!(await fs.lstat(ancestor)).isSymbolicLink(), 'SYMLINK', 'Choose a real directory, not a symlink, as the source root');
+        }
+        invariant((await fs.lstat(root)).isDirectory(), 'SOURCE_TYPE', 'Source root must be a directory');
+        await walk(root, '');
+    });
 }
 export async function scanLocal(root, policy) {
     const result = Object.create(null);
-    async function walk(dir, prefix) {
-        for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
-            const rel = prefix + entry.name;
-            if (excluded(rel, policy))
-                continue;
-            const path = await safePath(root, rel);
-            if (entry.isDirectory())
-                await walk(path, rel + '/');
-            else {
-                invariant(entry.isFile(), 'SOURCE_TYPE', `Unsupported source file (symlinks are not followed): ${rel}`);
-                const st = await fs.lstat(path);
-                invariant(st.size <= policy.maxFileBytes, 'FILE_TOO_LARGE', `Source file exceeds sync limit: ${rel}`);
-                const data = await fs.readFile(path);
-                result[rel] = { hash: hash(data), size: data.length, mode: st.mode & 0o777 };
-                invariant(Object.keys(result).length <= policy.maxFiles, 'TOO_MANY_FILES', 'Source tree exceeds file-count limit');
-            }
+    await walkLocal(root, policy, async (rel, entry, reason) => {
+        if (reason || entry.isDirectory())
+            return;
+        invariant(entry.isFile(), 'SOURCE_TYPE', `Unsupported source file (symlinks are not followed): ${rel}`);
+        const path = await safePath(root, rel), st = await fs.lstat(path);
+        invariant(st.size <= policy.maxFileBytes, 'FILE_TOO_LARGE', `Source file exceeds sync limit: ${rel}`);
+        const data = await fs.readFile(path);
+        result[rel] = { hash: hash(data), size: data.length, mode: st.mode & 0o777 };
+        invariant(Object.keys(result).length <= policy.maxFiles, 'TOO_MANY_FILES', 'Source tree exceeds file-count limit');
+    });
+    return result;
+}
+/** Read-only metadata snapshot: no content reads, hashes, baseline, provider or remote checks. */
+export async function syncPreview(root, policy) {
+    const result = {
+        scope: 'local-only', included: [], excluded: [],
+        files: { count: 0, bytes: 0, limits: { maxFiles: policy.maxFiles, maxFileBytes: policy.maxFileBytes }, overFileCount: false, oversized: [] },
+        symlinks: [], unsupportedTypes: [], sensitiveNameRisks: [],
+        readiness: { scope: 'local-only', ready: false, remote: 'not-checked' }, errors: []
+    };
+    const report = (path, code, message) => { result.errors.push({ path, code, message }); };
+    await walkLocal(root, policy, async (rel, entry, reason) => {
+        if (reason?.reason === 'minimum-security' || isSecretName(entry.name))
+            result.sensitiveNameRisks.push({ path: rel, excluded: !!reason, reason: 'sensitive-name-only' });
+        if (entry.isSymbolicLink())
+            result.symlinks.push(rel);
+        const unsupported = !entry.isSymbolicLink() && !entry.isDirectory() && !entry.isFile();
+        if (unsupported)
+            result.unsupportedTypes.push({ path: rel, type: entry.isFIFO() ? 'fifo' : entry.isSocket() ? 'socket' : entry.isBlockDevice() ? 'block-device' : entry.isCharacterDevice() ? 'character-device' : 'unknown' });
+        if (reason) {
+            result.excluded.push({ path: rel, ...reason });
+            return;
         }
-    }
-    await walk(root, '');
+        if (entry.isSymbolicLink()) {
+            report(rel, 'SYMLINK', 'Remove the link or explicitly exclude it; symlinks are not followed');
+            return;
+        }
+        if (unsupported) {
+            report(rel, 'SOURCE_TYPE', 'Exclude or replace this entry with a regular file or directory');
+            return;
+        }
+        const path = await safePath(root, rel);
+        if (entry.isDirectory())
+            return;
+        const info = await fs.lstat(path);
+        invariant(info.isFile(), 'SOURCE_TYPE', 'Source changed type during preview; retry');
+        result.included.push({ path: rel, reason: 'included', bytes: info.size });
+        result.files.count++;
+        result.files.bytes += info.size;
+        if (info.size > policy.maxFileBytes) {
+            result.files.oversized.push(rel);
+            report(rel, 'FILE_TOO_LARGE', 'Exclude or shrink this file, or raise sync.maxFileBytes');
+        }
+        await fs.access(path, constants.R_OK);
+    }, (rel, error) => {
+        const code = errorCode(error) ?? 'SOURCE_SCAN';
+        report(rel, code, code === 'CONFIG' ? 'Use supported sync patterns and positive safe-integer limits' : code === 'EACCES' || code === 'EPERM' ? 'Grant read/search permission or exclude this path, then retry' : code === 'SYMLINK' ? 'Choose a real source directory without symlink ancestors' : 'Source could not be inspected; check its path/type and retry');
+    });
+    result.files.overFileCount = result.files.count > policy.maxFiles;
+    if (result.files.overFileCount)
+        report('.', 'TOO_MANY_FILES', 'Exclude unneeded files or raise sync.maxFiles');
+    result.readiness.ready = result.errors.length === 0;
+    // No timestamps, absolute paths or OS error text; JSON ordering is deterministic.
+    const compare = (a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+    for (const rows of [result.included, result.excluded, result.unsupportedTypes, result.sensitiveNameRisks, result.errors])
+        rows.sort(compare);
+    result.symlinks.sort();
+    result.files.oversized.sort();
     return result;
 }
 function same(a, b) { return a?.hash === b?.hash && (a === undefined || b === undefined || (a.mode & 0o111) === (b.mode & 0o111)); }

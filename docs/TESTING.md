@@ -2,9 +2,12 @@
 
 ## Local suites
 
-`npm run verify` performs strict TypeScript checking, regenerates `dist/`, and runs
-all non-live suites using Node's native test runner. `npm test` can run directly
-from the delivered compiled tree with no npm dependency download.
+After `npm run tools:install`, `npm run verify:release` checks committed `dist/`
+against a temporary build **before rebuilding**, checks core and real pinned Daytona
+SDK declarations, builds, runs every non-live suite, CLI smoke and offline tarball
+installation in an isolated HOME/prefix. After source edits, build before this gate.
+`npm test` alone does not rebuild and now requires isolated developer tools/SDKs;
+missing tooling fails instead of silently skipping release tests. No cloud auth is needed.
 
 - Unit: deterministic routing, inline env filtering, TOML/config validation,
   unsupported resources, safe paths, exclusion rules, three-way planning and lanes.
@@ -62,8 +65,9 @@ Additional release-fix regression code (not executed in the original repair roun
 - `sync-regressions.test.mjs`: conflict evidence path collisions, merged file-count limit,
   legal 255-byte filenames in both directions, long-name conflict copies and reserved temps.
 
-The current results, environment and next acceptance checks live in
-[PROJECT-REVIEW.md](PROJECT-REVIEW.md). The follow-up also passed typechecking and CLI
+The above 154-test follow-up is historical. Current hardening results and checkpoints
+live in [HARDENING.md](HARDENING.md); the controlled native trial checklist is
+[LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md). The follow-up also passed typechecking and CLI
 smoke; a temporary rebuild matched the existing `dist/`. These results come from the
 session output, with no new archived TAP or commit association. Earlier passing TAP
 records remain historical and do not verify the new changes. Live providers, native
@@ -117,3 +121,25 @@ provenance only, validates/extracts the zip, rejects secret/cache paths, runs th
 extracted CLI and executes extracted unit/harness tests. The deliverable's checksum
 and exact commit are written to `reroute-packaging-report.json` outside the source
 tree and `DELIVERY-STATE.json` inside the archive.
+
+## Pre-test hardening regressions
+
+- `unit/release-validation.test.mjs`: stale/missing/extra dist and isolated offline package gates.
+- `sdk/daytona-types.ts` and `contract/daytona-sdk.test.mjs`: installed 0.223.1 declarations,
+  real SDK error taxonomy, bounded operation shapes, create-before-snapshot resource checks.
+- `contract/daytona-lifecycle.test.mjs` and `unit/lifecycle.test.mjs`: long active work,
+  finite crash-stop model, renewal faults/non-overlap/disposal, pending-source recovery,
+  ownership/generation damage and warm transport checks; this is not a billing simulation.
+- `integration/runtime-recovery.test.mjs`: stopped/archive restore of the same ID/root/
+  generation, unknown/missing refusal, network retry/conflicts, shutdown races, baseline
+  protection, explicit destroy after reconciliation and no implicit cold compute resume.
+- `integration/sync-preview.test.mjs`: metadata-only no-write/no-hash preflight, shared
+  exclusions, TS/Python limited-glob parity, unreadable/type/symlink and limit diagnostics.
+- `integration/setup-uninstall.test.mjs`: isolated agent HOME, explicit activation,
+  content/exact-entry ownership, user edits and unrelated settings, legacy refusal,
+  missing files, malformed JSON and symlink protection; no actual host is launched.
+- `integration/readonly-cli.test.mjs`: stable/readable local-only sync and explain,
+  no daemon/identity/baseline/resource side effects, routing/override/interception limits.
+
+Node 22 MockTimers currently emits an experimental API warning; that is not a skipped
+assertion. GitHub matrix results must be reported separately from local Node checks.

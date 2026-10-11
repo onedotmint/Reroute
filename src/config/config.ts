@@ -5,6 +5,7 @@ import { errorCode, invariant, RerouteError } from '../core/errors.js';
 import { RUNTIME_COMMANDS, isSecretName } from '../core/routing.js';
 import { home } from '../platform/files.js';
 import { parseTOML } from './toml.js';
+import { validSyncPattern } from '../sync/sync.js';
 export const PROVIDERS: ProviderId[] = ['daytona','ssh','skypilot','modal','e2b'];
 export const DEFAULT_CONFIG: ProjectConfig = {
   provider: 'daytona', runtime: { idleTimeoutMinutes: 10, env: {} }, providers: {},
@@ -61,8 +62,8 @@ export function validateConfig(input: unknown): ProjectConfig {
     }
   }
   const sync = input.sync; known(sync, ['excludes','maxFileBytes','maxFiles'], 'sync');
-  invariant(Array.isArray(sync.excludes) && sync.excludes.every(x => typeof x === 'string' && !x.includes('..')), 'CONFIG', 'sync.excludes must be safe glob strings');
-  for (const key of ['maxFileBytes','maxFiles']) invariant(Number.isInteger(sync[key]) && Number(sync[key]) > 0, 'CONFIG', `sync.${key} must be a positive integer`);
+  invariant(Array.isArray(sync.excludes) && sync.excludes.every(validSyncPattern), 'CONFIG', 'sync.excludes supports literals, *, ?, and complete ** path segments; brackets, braces, negation and backslashes are unsupported');
+  for (const key of ['maxFileBytes','maxFiles']) invariant(Number.isSafeInteger(sync[key]) && Number(sync[key]) > 0, 'CONFIG', `sync.${key} must be a positive safe integer`);
   const routing = input.routing; known(routing, ['commands','envAllow'], 'routing');
   for (const key of ['commands','envAllow']) invariant(Array.isArray(routing[key]) && (routing[key] as unknown[]).every(x => typeof x === 'string'), 'CONFIG', `routing.${key} must be a string array`);
   invariant((routing.commands as string[]).every(x => /^[A-Za-z0-9_+.-]+$/.test(x) && x !== '.' && x !== '..'), 'CONFIG', 'Runtime command names must be basenames');

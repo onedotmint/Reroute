@@ -22,6 +22,33 @@ Official evidence inspected:
 
 Commands run: `npm run build && npm run verify:release`. Dist parity, both typechecks, build, **249 local tests (249 pass, 0 fail, 0 skip)**, smoke and isolated offline npm install passed. Earlier original-runtime recovery tests also passed on Node 22. These exercise fixtures/real local workers, not cloud API, disk persistence, billing or native Pi compatibility; those remain **UNVERIFIED**.
 
-## Remaining phase
+## Phase C — local inspection and explicit/reversible adapters
 
-Phase C (R-05/R-06/R-07) must implement local-only sync preview, explicit/reversible adapters and route explanation. Current gate: **NOT READY** until those local changes and their regression gates are complete. No live calls, paid resources, global agent settings, pushes or npm publication were performed.
+- **R-05:** `reroute sync --dry-run [--json]` reports local included/excluded paths/reasons, count/bytes/limits, symlinks/unsupported types, sensitive-name risks and local readiness. It reads metadata only: no source contents/hashes, baseline/identity writes, daemon/provider/resource creation or remote conflict claim. Excluded directories are pruned. Scan blockers produce an actionable report/exit 65. Local and Python worker exclusions now agree on rooted/basename patterns, `*`, `?`, complete `**` segments and ancestor pruning; unsupported syntax fails explicitly. Mandatory security/build/state exclusions remain non-removable.
+- **R-06:** Default setup is Reroute-only; detected hosts are informational. `--harness` is explicit. `reroute uninstall [--harness ...]` removes only content-hash-matching owned adapter files or exact owned hook entries, preserves user changes/unrelated configuration/backups/resources, and is idempotent. Marker comments/legacy command history alone cannot authorize overwrite/removal. `doctor --fix` repairs only explicitly recorded safe ownership, not detected hosts. Symlinks/malformed JSON/out-of-home paths fail closed. Codex's approving-hook opt-in is unchanged.
+- **R-07:** `reroute explain [--json] -- pnpm test` reuses execution's routing decision and reports matched rule, enabled project/provider, configured route, actual transparent PATH eligibility, overrides and limitations. No command/daemon/remote state mutation occurs. Absolute paths, wrappers, aliases and hidden package-script operations are not falsely claimed as intercepted.
+- Additional closure of a Phase B safety finding: warm Daytona file and execution operations now verify the remote owner/generation before each operation, not just cold restoration; a changed disk cannot be trusted because coordinator state is warm.
+
+`npm run build && npm run verify:release` passed on Node **24.21.0**, followed by the complete `verify:release` gate under Node **22**. Each run passed **289 local tests (289 pass, 0 fail, 0 cancelled, 0 skip)** plus dist parity, core/vendor typechecking, build, smoke and isolated offline tarball installation. TypeScript 5.8.3 and Python 3.14.4 were used. Node 22 emits the expected experimental MockTimers warning. GitHub CI has not been executed remotely.
+
+## Gate and remaining verification
+
+Local hardening R-01–R-07 is complete: **READY FOR CONTROLLED DAYTONA TEST**, not production-ready or live-certified. Follow [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md) only after explicit account-owner authorization, cost ceiling and cleanup ownership. Real Daytona API/auth, long-lived activity, retained disk across native stop/archive, browser preview, Pi compatibility and native resource/billing cleanup remain **UNVERIFIED**. Other providers and Windows/macOS are not certified by these checks.
+
+No live calls, paid resources, real global agent settings, pushes, PR/issues or npm publication were performed. Historical TAP evidence is unchanged. Local checkpoints: Phase A `2403eec`, Phase B `1cced62`; Phase C is the commit containing this section (obtain its SHA from Git).
+
+## Safety review and scope
+
+Preserved local source/Git authority, native shell/Bash semantics, provider/core
+separation, serialized shared-project mutations, three-way sync, agreed hashes,
+backups/conflict evidence, pending-source guards, mandatory credential exclusions,
+Codex opt-in and no implicit local fallback. No dependency or remote watchdog was
+added. Narrow durable constraints live under `specs/engineering/`; Charterleaf
+activation configuration is unchanged. Structural lint is not semantic proof.
+
+Known intentional limits: metadata snapshots can race later edits; ignore/name
+checks are not DLP; ownership cleanup is conservative, not whole-config rollback;
+legacy marker-only installations need manual review; ownership checks add Python/
+SSH calls to Daytona transfers; SDK/API delays and scheduling require live budget/
+cleanup evidence; signed preview links expire and must not be shared unredacted.
+No production/cloud/native-host certification follows from the local gate.

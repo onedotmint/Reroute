@@ -9,12 +9,13 @@ export const RUNTIME_COMMANDS = [
 ];
 const CONTROL = new Set(['git','gh','rg','grep','find','ls','cat','sed','awk','ssh','scp','rsync','sky','daytona','modal','e2b','aws','gcloud','az','kubectl','docker','podman','reroute']);
 const IDENTITY = new Set(['publish','login','logout','whoami','deploy','token','tokens','auth','owner','owners','config','credential','credentials']);
-export function route(argv: string[], commands = RUNTIME_COMMANDS): 'local' | 'remote' {
+export function routingDecision(argv: string[], commands = RUNTIME_COMMANDS): { executable: string; route: 'local' | 'remote'; rule: string } {
   const executable = basename(argv[0] ?? '').replace(/\.(exe|cmd)$/i, '');
-  if (CONTROL.has(executable)) return 'local';
-  if (['cargo','npm','npx','pnpm','yarn','bun','uv','poetry','pdm','deno'].includes(executable) && argv.slice(1).some(x => IDENTITY.has(x))) return 'local';
-  return commands.includes(executable) ? 'remote' : 'local';
+  if (CONTROL.has(executable)) return { executable, route: 'local', rule: 'control-command' };
+  if (['cargo','npm','npx','pnpm','yarn','bun','uv','poetry','pdm','deno'].includes(executable) && argv.slice(1).some(x => IDENTITY.has(x))) return { executable, route: 'local', rule: 'identity-subcommand' };
+  return commands.includes(executable) ? { executable, route: 'remote', rule: 'configured-runtime-command' } : { executable, route: 'local', rule: 'not-configured-runtime-command' };
 }
+export function route(argv: string[], commands = RUNTIME_COMMANDS): 'local' | 'remote' { return routingDecision(argv, commands).route; }
 const SECRET_NAME = /(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|PRIVATE_?KEY|AUTHORIZATION|COOKIE|SESSION|^AWS_|^AZURE_|^GOOGLE_|^GITHUB_|^GH_|^DAYTONA_|^MODAL_|^E2B_|^DSH_)/i;
 const CONTROL_ENV = /^(?:PATH|HOME|USER|LOGNAME|SHELL|PWD|OLDPWD|SHLVL|_|NODE_OPTIONS|NODE_PATH|PYTHONPATH|PYTHONHOME|BASH_ENV|ENV|SSH_.*|REROUTE_.*|LD_.*|DYLD_.*|XDG_.*)$/;
 export function isControlEnv(key: string): boolean { return CONTROL_ENV.test(key); }

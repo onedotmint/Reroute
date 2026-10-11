@@ -47,7 +47,9 @@ delivery environment, not every developer's current machine. The remaining gaps 
 10. **Setup/doctor scope.** Discovery checks binaries/directories and repairs owned
     files; it is not exhaustive host-version conflict detection or cloud service
     diagnosis. Native authentication is presence-detected, not validated by setup.
-    There is no automatic uninstaller. Re-run enable after config changes.
+    Default setup does not auto-install detected hosts. Explicit safe uninstall
+     removes only unchanged owned adapter files/exact hook entries and is not cloud cleanup.
+     Re-run enable after config changes.
 
 These are not hidden TODO provider classes: actual implementations live in
 `src/providers/`, shared local contracts run, and the archive is executable. The

@@ -154,3 +154,14 @@ test('a pre-existing named sandbox without recorded generation cannot be reiniti
   assert.equal(f.calls.autoStop.length, timers);
   await assert.rejects(fs.stat(join(f.remote, '.reroute-runtime/owner.json')), { code: 'ENOENT' });
 });
+
+test('warm Daytona file transport and execution verify ownership before every operation', async t => {
+  const f = await boundary(t), files = f.provider.files(f.runtime), marker = join(f.remote, '.reroute-runtime/owner.json');
+  const before = await fs.readFile(marker, 'utf8');
+  await fs.writeFile(marker, JSON.stringify({ ...JSON.parse(before), generation: '22222222-2222-4222-8222-222222222222' }));
+  await assert.rejects(files.scan({ excludes: [], maxFiles: 1000, maxFileBytes: 1000 }), e => e.code === 'WORKSPACE_IDENTITY');
+  await assert.rejects(files.apply([{ path: 'MUST_NOT_EXIST', expected: null, data: Buffer.from('bad').toString('base64') }], { excludes: [], maxFiles: 1000, maxFileBytes: 1000 }), e => e.code === 'WORKSPACE_IDENTITY');
+  await assert.rejects(f.provider.exec(f.runtime, { argv: ['python3', '-c', "open('MUST_NOT_EXIST','w').write('bad')"], cwd: f.runtime.root, env: {} }), e => e.code === 'WORKSPACE_IDENTITY');
+  await assert.rejects(fs.stat(join(f.remote, 'MUST_NOT_EXIST')), { code: 'ENOENT' });
+  assert.equal(f.calls.initialize, 1); assert.equal(f.calls.create, 0);
+});

@@ -1,4 +1,9 @@
 export declare const RUNTIME_COMMANDS: string[];
+export declare function routingDecision(argv: string[], commands?: string[]): {
+    executable: string;
+    route: 'local' | 'remote';
+    rule: string;
+};
 export declare function route(argv: string[], commands?: string[]): 'local' | 'remote';
 export declare function isControlEnv(key: string): boolean;
 export declare function isSecretName(key: string): boolean;

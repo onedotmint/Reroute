@@ -1,6 +1,7 @@
 import type { Capabilities, ProjectRef, RuntimeRef, RuntimeSpec, RuntimeStatus, IdlePolicy } from '../core/contracts.js';
 import { type RawProcess } from '../platform/process.js';
 import { RemoteProvider } from './common.js';
+import type { Launch } from './channel.js';
 export type DaytonaSandboxState = 'creating' | 'restoring' | 'destroyed' | 'destroying' | 'started' | 'stopped' | 'starting' | 'stopping' | 'error' | 'build_failed' | 'pending_build' | 'building_snapshot' | 'unknown' | 'pulling_snapshot' | 'archived' | 'archiving' | 'resizing' | 'snapshotting' | 'forking' | 'pausing' | 'paused' | 'resuming' | '11184809';
 declare const GPU_TYPES: readonly ["H100", "H200", "B300", "RTX-PRO-6000", "RTX-4090", "RTX-5090", "MI355X"];
 export type DaytonaGpuType = typeof GPU_TYPES[number];
@@ -100,6 +101,7 @@ export declare class DaytonaProvider extends RemoteProvider {
     private readonly sdkLoader;
     readonly id: "daytona";
     readonly capabilities: Capabilities;
+    protected bridge: Launch;
     private client?;
     private sdkModule?;
     private access;

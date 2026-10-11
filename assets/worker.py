@@ -4,7 +4,7 @@ Not a security sandbox: the provider supplies isolation. This process supplies p
 cleanup, framed binary stdio, source path checks and compare-before-write synchronization.
 """
 import base64
-import fnmatch
+import re
 import hashlib
 import json
 import os
@@ -34,13 +34,47 @@ def emit(packet):
         sys.stdout.flush()
 
 
+def valid_sync_pattern(value):
+    if not isinstance(value, str) or not value or re.search(r'[\[\]{}!\\\x00-\x1f\x7f]', value) or re.search(r'[?*+@]\(', value) or '..' in value or value.startswith('/'):
+        return False
+    parts = value.removesuffix('/').split('/')
+    return all(p not in ('', '.') and ('**' not in p or p == '**') for p in parts)
+
+
+def glob(pattern):
+    if not valid_sync_pattern(pattern):
+        raise ValueError('UNSUPPORTED_SYNC_PATTERN: use literals, *, ?, or a complete ** path segment')
+    parts = pattern.removesuffix('/').split('/')
+    source = ''
+    for i, part in enumerate(parts):
+        if part == '**':
+            source += r'[\s\S]*' if i == len(parts) - 1 else r'(?:[^/]+/)*'
+        else:
+            source += ''.join('[^/]*' if c == '*' else '[^/]' if c == '?' else re.escape(c) for c in part)
+            if i < len(parts) - 1:
+                source += '/'
+    return re.compile(source)
+
+
+def validate_policy(policy):
+    if not isinstance(policy.get('excludes'), list) or not all(valid_sync_pattern(p) for p in policy['excludes']):
+        raise ValueError('UNSUPPORTED_SYNC_PATTERN')
+    if any(type(policy.get(k)) is not int or not 0 < policy[k] <= 9007199254740991 for k in ('maxFiles', 'maxFileBytes')):
+        raise ValueError('INVALID_SYNC_LIMIT')
+
+
 def excluded(path, policy):
     parts = path.split('/')
     if any(p in EXCLUDED or p in SECRET_FILES or p.startswith('.reroute-tmp-') or p == '.env' or p.startswith('.env.')
            or p.lower().endswith(('.pem', '.key', '.p12', '.pfx', '.keystore')) for p in parts):
         return True
-    return any(fnmatch.fnmatchcase(path, pattern) or any(fnmatch.fnmatchcase(p, pattern) for p in parts)
-               for pattern in policy.get('excludes', []))
+    # Basename patterns apply at any depth; path patterns also protect descendants.
+    for pattern in policy.get('excludes', []):
+        matcher = glob(pattern)
+        candidates = ['/'.join(parts[:i + 1]) for i in range(len(parts))] if '/' in pattern.removesuffix('/') else parts
+        if any(matcher.fullmatch(p) for p in candidates):
+            return True
+    return False
 
 
 def safe_path(root, relative, policy):
@@ -79,6 +113,7 @@ def digest(path, allow_directory=False):
 
 
 def scan(root, policy):
+    validate_policy(policy)
     result = {}
     for directory, directories, files in os.walk(root, followlinks=False):
         rel_dir = os.path.relpath(directory, root)
@@ -122,6 +157,7 @@ def remove_empty_tree(root, relative, policy):
 
 def rpc(request, root):
     policy = request['policy']
+    validate_policy(policy)
     action = request['action']
     if action == 'scan':
         return scan(root, policy)

@@ -1,5 +1,9 @@
 # Harness integrations
 
+`reroute setup` configures only Reroute itself by default; discovery is informational.
+Use explicit `--harness pi` (or a comma-separated list) to activate adapters, and restart
+the selected host. `doctor --fix` must not install a merely detected harness.
+
 These adapters preserve a native shell/Bash tool. They never define a model-facing
 `remote_exec`, contain provider logic, or inject sandbox identifiers into prompts.
 Every adapter has protocol fixtures. **No actual harness binary was installed or
@@ -121,6 +125,14 @@ Reroute does not parse script bodies or act as an agent security sandbox. Keep
 identity-bearing composite workflows explicit and local.
 
 `reroute disable` makes that project pass through; it does not uninstall global hooks.
-To uninstall, remove only the Reroute-owned extension/plugin and the exact owned
-hook command shown in `~/.reroute/installed-hooks.json`, preserving other hooks,
-then uninstall the package. Automatic uninstall/config rollback is not implemented.
+Use `reroute uninstall --harness pi` (or a comma-separated selection) to remove only
+unchanged Reroute-owned files and exact owned hook entries. User-edited files and
+other hooks/settings are preserved and reported; a repeat uninstall is harmless.
+`reroute uninstall` targets the recorded adapters, not project runtimes, SDKs, secrets,
+backups or arbitrary global configuration. Stop/sync resources separately, then remove
+the npm package if desired. It does not imply cloud cleanup or zero billing.
+
+Older installations that only have marker comments/command history are not evidence
+of content ownership. Safe uninstall/reinstall deliberately refuses to claim them;
+review and remove the exact old adapter manually (keeping unrelated content), then
+perform explicit setup to record its content hash/exact hook entry.

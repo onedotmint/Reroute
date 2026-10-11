@@ -4,6 +4,7 @@ import { invariant, RerouteError } from '../core/errors.js';
 import { spawnRaw, shellCommand, type RawProcess } from '../platform/process.js';
 import { RemoteProvider, loadSdk, sdkMissing, runtimeRef } from './common.js';
 import { sshArgs } from './ssh.js';
+import type { Launch } from './channel.js';
 export type DaytonaSandboxState = 'creating' | 'restoring' | 'destroyed' | 'destroying' | 'started' | 'stopped' | 'starting' | 'stopping' | 'error' | 'build_failed' | 'pending_build' | 'building_snapshot' | 'unknown' | 'pulling_snapshot' | 'archived' | 'archiving' | 'resizing' | 'snapshotting' | 'forking' | 'pausing' | 'paused' | 'resuming' | '11184809';
 const GPU_TYPES = ['H100', 'H200', 'B300', 'RTX-PRO-6000', 'RTX-4090', 'RTX-5090', 'MI355X'] as const;
 export type DaytonaGpuType = typeof GPU_TYPES[number];
@@ -48,6 +49,8 @@ export interface DaytonaProviderOptions {
 export class DaytonaProvider extends RemoteProvider {
   readonly id = 'daytona' as const;
   readonly capabilities: Capabilities = { resources: ['cpu','memoryMiB','diskGiB','gpu','region','image','spot'], persistence: 'disk', idle: 'stop', preview: true, stdin: true, nativeIdle: true };
+  // Warm coordinator state is not proof that the remote disk still has its original owner.
+  protected override bridge: Launch = async (runtime, argv) => { await this.verifyWorkspace(runtime); return this.launch(runtime, argv); };
   private client?: DaytonaClient;
   private sdkModule?: DaytonaSdk;
   private access = new Map<string, { token: string; expires: number }>();

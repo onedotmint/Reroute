@@ -9,6 +9,8 @@ export class DaytonaProvider extends RemoteProvider {
     sdkLoader;
     id = 'daytona';
     capabilities = { resources: ['cpu', 'memoryMiB', 'diskGiB', 'gpu', 'region', 'image', 'spot'], persistence: 'disk', idle: 'stop', preview: true, stdin: true, nativeIdle: true };
+    // Warm coordinator state is not proof that the remote disk still has its original owner.
+    bridge = async (runtime, argv) => { await this.verifyWorkspace(runtime); return this.launch(runtime, argv); };
     client;
     sdkModule;
     access = new Map();

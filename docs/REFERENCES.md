@@ -36,6 +36,9 @@ Daytona:
 - `https://www.daytona.io/docs/en/typescript-sdk/daytona/`
 - `https://www.daytona.io/docs/en/typescript-sdk/sandbox/`
 - `https://www.daytona.io/docs/en/ssh-access/`
+- `https://www.daytona.io/docs/en/sandboxes.md` — activity refresh and native lifecycle
+- `https://www.daytona.io/docs/en/persistence.md` — CPU container vs GPU disk behavior
+- Published `@daytona/sdk@0.223.1` declarations/implementation checked against injected boundaries (local; no authenticated client).
 
 SkyPilot:
 - `https://docs.skypilot.ai/en/latest/reference/cli.html`

@@ -8,7 +8,7 @@ Reroute 是一个 TypeScript / Node.js 命令执行路由工具。它通过本�
 
 > 当前是预览版，不是生产就绪或云端兼容性认证。已有本地测试与真实 Python 子进程测试，但云 SDK 契约、真实远程主机和原生代理运行仍需实测。使用敏感或付费环境前，请阅读[安全说明](docs/SECURITY.md)与[已知限制](docs/LIMITATIONS.md)。
 
-**当前进度：** 首次检查点为 `a67c306`；正在按阶段完成真实 Daytona + Pi 验收前的硬化。当前结果、剩余限制和验收门槛以 [Pre-test hardening](docs/HARDENING.md) 为准；本地/SDK 声明验证不代表真实云端认证。
+**当前进度：** R-01–R-07 本地硬化已完成，Node 22/24 完整门禁各 **289/289 通过、0 跳过**；已具备受控 Daytona + Pi 验收前提，但真实云端/代理/计费仍为 **UNVERIFIED**。当前结果、剩余限制和验收门槛以 [Pre-test hardening](docs/HARDENING.md) 为准；本地/SDK 声明验证不代表真实云端认证。
 
 ## 项目已有的能力
 
@@ -88,6 +88,13 @@ SDK 按需安装在 `~/.reroute/sdk/`；认证不由 Reroute 托管。远程镜�
 ## 常用命令
 
 ```sh
+reroute setup                  # 仅 Reroute 自身；不会按检测结果自动装代理扩展
+reroute setup --harness pi      # 显式选择；安装后重启 Pi
+reroute uninstall --harness pi  # 只卸载未被用户改动的自有扩展/精确 hook
+reroute sync --dry-run          # 本地只读：上传范围、排除原因、大小及风险
+reroute sync --dry-run --json
+reroute explain -- pnpm test    # 不执行、不连接 daemon/云端
+reroute explain --json -- pnpm test
 reroute status
 reroute doctor
 reroute doctor --fix            # 只修复 Reroute 自己拥有的文件
@@ -112,10 +119,10 @@ reroute dev stop
 - 符号链接会被拒绝，而不是跟随；凭据排除不能被用户配置撤销。
 - 双方冲突时退出码为 **73**，远程副本保存在 `.reroute/conflicts/<id>/remote/<原始路径>`，不覆盖有分歧的本地文件。
 - 比较并在本地解决后，使用 `reroute sync --accept-local` 明确确认本地版本。
-- 回传失败时 `status` 显示 `syncPending: true`，保留原运行时并抑制空闲清理，可能继续计费；成功同步后解除保护。原资源已停止时，先通过后端原生工具恢复，再同步，不能跳过回传直接销毁。
+- 回传失败时 `status` 显示 `syncPending: true`，保留原运行时和基线；成功同步后解除保护。Daytona 即使 pending 也保留有限原生 auto-stop，停止/归档后 `reroute sync` 会校验原 ID/工作区 generation 并恢复同一资源。其他不支持恢复的后端须原生恢复，不能跳过回传直接销毁。
 - CLI 超时返回 **124**，取消返回 **130**，即使子程序处理终止信号后自行退出 0，也不会被当成成功。
 - 命令拦截依赖 PATH，不是安全沙箱；绝对可执行路径、隐藏在脚本中的部署行为或未接入的代理工具可能绕过路由。
-- 本地机器崩溃仍可能留下计费中的云运行时，必须配合云端预算和原生清理机制。
+- Daytona 活跃任务保留至少五分钟原生 auto-stop，并每分钟刷新 activity；daemon 崩溃后刷新停止。此行为、磁盘保留及实际计费仍标为 **UNVERIFIED**，须配合预算和原生验收；GPU/Spot/VM、硬 TTL 及 auto-delete 不用于 Daytona 源码工作区。其他后端仍有各自的崩溃/生命周期限制。
 
 ## 开发与文档
 

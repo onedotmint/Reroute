@@ -12,7 +12,8 @@ stop active commands/dev work first. Changing provider requires destroying the
 old runtime explicitly, rather than orphaning it silently. `--new-identity` cannot
 bypass this protection for an owned runtime at the same path. A copied/moved identity
 can acquire a new UUID without deleting the original resource. Destruction of a stopped
-runtime requires resuming the original with native provider tools and synchronizing first;
+runtime requires resuming the original and synchronizing first (Daytona can do this
+via `reroute sync` after identity verification; other providers need native resume);
 an unknown status is not permission to delete. Newly excluded files leave
 the synchronization baseline without deleting their local or remote copies. Removing
 an exclusion later treats the files as newly entering sync; divergent copies conflict.
@@ -70,6 +71,31 @@ run that deliberately through `reroute local -- ...`.
 Excludes cannot undo mandatory credential/build exclusions. `.reroute-tmp-*` names
 are reserved for same-directory atomic writes and excluded on both sides. `maxFiles`
 applies to the merged source tree as well as each scan; an over-limit merge is refused
-before changing either tree. Globs support `*` and
-`?`; complex Git ignore semantics are not implemented. `.gitignore` is not treated
+before changing either tree. Local and Python worker exclusions use the same bounded
+syntax: `*` and `?` do not cross `/`; a complete `**` segment spans zero or more
+segments. A basename pattern (including a literal directory name) matches at any
+depth; a pattern containing `/` is rooted at the source root. Matching an ancestor
+excludes its subtree; trailing `/` is accepted and normalized. No negation, character
+classes, braces, backslashes, absolute paths, control characters, `..` or embedded
+`**` are supported. Unsupported syntax is rejected explicitly rather than behaving
+differently across scanners. Check the effective list with `reroute sync --dry-run`. `.gitignore` is not treated
 as a credential policy. Symlinks and reserved path components are rejected.
+
+## Local-only preflight commands
+
+`reroute sync --dry-run [--json]` scans only the local source tree and effective sync
+policy. It reports included files, excluded entries/reasons, count/bytes/limits,
+symlinks/unsupported types and sensitive-name risks. It does not start a daemon,
+create a resource, update identity/baseline, upload source or inspect remote conflicts.
+Readiness is only local scan readiness, never cloud readiness or proof of no secrets.
+Excluded directories are pruned, so their descendants/counts are not enumerated.
+An actionable local scan blocker returns exit 65 with the report; invalid config/usage
+fails before scanning. A metadata preview cannot promise the tree will stay unchanged
+or that the remote worker can read/write it later.
+
+`reroute explain [--json] -- pnpm test` uses the same routing rules as execution,
+plus enabled-project and recursion/local-override state. It explains PATH-shim
+eligibility separately from configured policy; absolute executable paths bypass
+shims. Shell wrappers, aliases and package script bodies are not parsed. Explicit
+`reroute exec` has a different entry boundary but still rejects control commands.
+The report does not execute the command or prove host activation/remote readiness.

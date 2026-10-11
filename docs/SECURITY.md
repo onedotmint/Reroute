@@ -91,3 +91,16 @@ SSH deletion checks the Reroute UUID/owner marker before removing its directory.
 Cloud destroy operations use the persisted provider handle. Project identities and
 native stores must not be copied between unrelated repositories. Keep backups of
 local source and review `reroute stop --destroy` semantics for your provider.
+
+## Read-only preflight and adapter ownership
+
+`sync --dry-run` and `explain` are local-only inspection, not execution or remote
+conflict detection. Neither may start IPC, create/repair identities or write a sync
+baseline. Filename exclusions and sensitive-name warnings are not DLP: inspect the
+included list yourself. The command argv and relative file names may themselves be
+sensitive; do not share raw JSON reports indiscriminately.
+
+Default setup never installs a detected harness implicitly. Explicit setup/uninstall
+operate on owned adapter entries; uninstall preserves changed files and unrelated
+hooks/settings. It is not a runtime destroy, credential purge or total config rollback.
+Codex's explicit approving-hook opt-in remains a separate trust decision.
