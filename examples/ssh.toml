@@ -1,0 +1,8 @@
+provider = "ssh"
+[providers.ssh]
+host = "my-build-host"
+# Python 3 and the project's toolchains must already be available remotely.
+# bootstrap = "python3 --version && cargo --version"
+# remoteRoot = "/srv/reroute/workspaces"
+[runtime]
+idleTimeoutMinutes = 10

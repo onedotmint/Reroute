@@ -1,0 +1,10 @@
+provider = "skypilot"
+[runtime]
+cpu = 4
+memoryMiB = 8192
+diskGiB = 30
+idleTimeoutMinutes = 10
+[providers.skypilot]
+infra = "aws"
+# instanceType = "your-provider-instance-type"
+# bootstrap = "python3 --version && your-toolchain --version"

@@ -1,0 +1,11 @@
+provider = "modal"
+[runtime]
+cpu = 2
+memoryMiB = 4096
+idleTimeoutMinutes = 10
+# image = "your-registry/your-build-image:tag"
+[providers.modal]
+app = "reroute"
+ports = [3000]
+timeoutMs = 86400000
+# secrets = ["a-native-modal-secret-name"]

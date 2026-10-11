@@ -1,0 +1,46 @@
+{
+  "name": "reroute",
+  "version": "0.1.0-preview.1",
+  "description": "Reroute project commands to remote compute while keeping source and coding agents local",
+  "repository": { "type": "git", "url": "git+https://github.com/onedotmint/Reroute.git" },
+  "homepage": "https://github.com/onedotmint/Reroute#readme",
+  "bugs": { "url": "https://github.com/onedotmint/Reroute/issues" },
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "reroute": "bin/reroute.mjs",
+    "rerouted": "bin/rerouted.mjs"
+  },
+  "exports": {
+    ".": "./dist/core/contracts.js",
+    "./pi": "./adapters/pi.mjs",
+    "./omp": "./adapters/omp.mjs",
+    "./opencode": "./adapters/opencode.mjs",
+    "./deepseek": "./adapters/deepseek.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "adapters",
+    "assets",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "docs",
+    "sdk-versions.json",
+    "examples"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "node scripts/build.mjs --check",
+    "test": "node --test --test-concurrency=4 tests/unit/*.test.mjs tests/contract/*.test.mjs tests/integration/*.test.mjs tests/harness/*.test.mjs",
+    "test:live": "node --test tests/live/*.test.mjs",
+    "verify": "npm run typecheck && npm run build && npm test",
+    "smoke": "node bin/reroute.mjs --help",
+    "package:source": "node scripts/package.mjs"
+  },
+  "packageManager": "pnpm@10.11.0"
+}

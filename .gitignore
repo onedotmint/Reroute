@@ -1,0 +1,9 @@
+node_modules/
+.tools/
+.reroute/
+.env
+.env.*
+*.tgz
+*.zip
+*.log
+coverage/

@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-06",
+  "release": "0.1.0-preview.1",
+  "commands": [
+    {
+      "command": "npm run typecheck",
+      "outcome": "PASS",
+      "note": "Strict TypeScript 5.8.3; locally available Node declarations; not vendor SDK declaration checking"
+    },
+    {
+      "command": "npm run build",
+      "outcome": "PASS"
+    },
+    {
+      "command": "npm test",
+      "outcome": "PASS",
+      "tests": 79,
+      "passed": 79,
+      "failed": 0,
+      "skipped": 0,
+      "durationMs": 59228.122498
+    },
+    {
+      "command": "npm run test:live",
+      "outcome": "SKIPPED: providers not configured",
+      "tests": 5,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 5
+    },
+    {
+      "command": "npm install --package-lock-only --ignore-scripts --offline --no-audit --no-fund",
+      "outcome": "PASS"
+    },
+    {
+      "command": "npm pack --ignore-scripts --pack-destination /mnt/data",
+      "outcome": "PASS"
+    },
+    {
+      "command": "npm install --prefix /mnt/data/outboard-install-smoke --ignore-scripts --offline --no-audit --no-fund /mnt/data/outboard-0.1.0-preview.1.tgz",
+      "outcome": "PASS"
+    },
+    {
+      "command": "/mnt/data/outboard-install-smoke/node_modules/.bin/ob --version",
+      "outcome": "0.1.0-preview.1"
+    },
+    {
+      "command": "/mnt/data/outboard-install-smoke/node_modules/.bin/ob --help",
+      "outcome": "PASS"
+    }
+  ],
+  "localCoverage": "All five production provider classes with native boundary fixtures; real subprocess/filesystem/IPC tests; seven protocol adapters. No live cloud or native harness runtime.",
+  "packagingEvidence": "After the final clean commit, generated outboard-packaging-report.json records source archive extraction and fresh extracted unit/harness tests.",
+  "blocked": [
+    {
+      "command": "npm view typescript version --fetch-retries=0 --fetch-timeout=15000",
+      "error": "EAI_AGAIN getaddrinfo registry.npmjs.org",
+      "classification": "environmental DNS"
+    },
+    {
+      "command": "curl -IL --max-time 10 https://github.com",
+      "error": "curl: (6) Could not resolve host: github.com",
+      "classification": "environmental DNS"
+    }
+  ]
+}

@@ -1,0 +1,766 @@
+TAP version 13
+# Subtest: Modal fallback closes only the worker stdin independently of a stuck SDK writer
+ok 1 - Modal fallback closes only the worker stdin independently of a stuck SDK writer
+  ---
+  duration_ms: 5236.750772
+  type: 'test'
+  ...
+# Subtest: daytona shared provider contract (native boundary fixtures, not live)
+ok 2 - daytona shared provider contract (native boundary fixtures, not live)
+  ---
+  duration_ms: 672.528062
+  type: 'test'
+  ...
+# Subtest: ssh shared provider contract (native boundary fixtures, not live)
+ok 3 - ssh shared provider contract (native boundary fixtures, not live)
+  ---
+  duration_ms: 708.002137
+  type: 'test'
+  ...
+# Subtest: skypilot shared provider contract (native boundary fixtures, not live)
+ok 4 - skypilot shared provider contract (native boundary fixtures, not live)
+  ---
+  duration_ms: 760.998404
+  type: 'test'
+  ...
+# Subtest: modal shared provider contract (native boundary fixtures, not live)
+ok 5 - modal shared provider contract (native boundary fixtures, not live)
+  ---
+  duration_ms: 463.376346
+  type: 'test'
+  ...
+# Subtest: e2b shared provider contract (native boundary fixtures, not live)
+ok 6 - e2b shared provider contract (native boundary fixtures, not live)
+  ---
+  duration_ms: 478.450649
+  type: 'test'
+  ...
+# Subtest: SkyPilot native resource units and provider-specific options
+ok 7 - SkyPilot native resource units and provider-specific options
+  ---
+  duration_ms: 0.373508
+  type: 'test'
+  ...
+# Subtest: claude normal Bash wire schema with all unrelated fields preserved
+ok 8 - claude normal Bash wire schema with all unrelated fields preserved
+  ---
+  duration_ms: 4.640472
+  type: 'test'
+  ...
+# Subtest: codex normal Bash wire schema with all unrelated fields preserved
+ok 9 - codex normal Bash wire schema with all unrelated fields preserved
+  ---
+  duration_ms: 0.252328
+  type: 'test'
+  ...
+# Subtest: cursor normal Bash wire schema with all unrelated fields preserved
+ok 10 - cursor normal Bash wire schema with all unrelated fields preserved
+  ---
+  duration_ms: 0.131018
+  type: 'test'
+  ...
+# Subtest: Pi retains native Bash definition and user-shell options
+ok 11 - Pi retains native Bash definition and user-shell options
+  ---
+  duration_ms: 1.322957
+  type: 'test'
+  ...
+# Subtest: OMP uses current input replacement, not the incompatible Pi operation surface
+ok 12 - OMP uses current input replacement, not the incompatible Pi operation surface
+  ---
+  duration_ms: 0.182235
+  type: 'test'
+  ...
+# Subtest: OpenCode v2 hooks only shell creation and keeps command fields
+ok 13 - OpenCode v2 hooks only shell creation and keeps command fields
+  ---
+  duration_ms: 1.56613
+  type: 'test'
+  ...
+# Subtest: DeepSeek preserves native foreground/background handle and trusted environment
+ok 14 - DeepSeek preserves native foreground/background handle and trusted environment
+  ---
+  duration_ms: 0.908039
+  type: 'test'
+  ...
+# Subtest: hook installation is idempotent and preserves unrelated settings
+ok 15 - hook installation is idempotent and preserves unrelated settings
+  ---
+  duration_ms: 20.891313
+  type: 'test'
+  ...
+# Subtest: all seven adapter installation paths are produced without editing unrelated files
+ok 16 - all seven adapter installation paths are produced without editing unrelated files
+  ---
+  duration_ms: 21.244234
+  type: 'test'
+  ...
+# Subtest: cancel bypasses a full child stdin pipe and prevents delayed writes
+ok 17 - cancel bypasses a full child stdin pipe and prevents delayed writes
+  ---
+  duration_ms: 232.97196
+  type: 'test'
+  ...
+# Subtest: timeout still terminates a command whose stdin pipe is full
+ok 18 - timeout still terminates a command whose stdin pipe is full
+  ---
+  duration_ms: 408.371794
+  type: 'test'
+  ...
+# Subtest: cancel deadline starts even when the transport never finishes sending
+ok 19 - cancel deadline starts even when the transport never finishes sending
+  ---
+  duration_ms: 5002.062621
+  type: 'test'
+  ...
+# Subtest: bounded stdin preserves concurrent write ordering and EOF for a slow reader
+ok 20 - bounded stdin preserves concurrent write ordering and EOF for a slow reader
+  ---
+  duration_ms: 273.80187
+  type: 'test'
+  ...
+# Subtest: CLI setup discovers Pi, enables a real IPC project, routes shell and keeps Git local
+ok 21 - CLI setup discovers Pi, enables a real IPC project, routes shell and keeps Git local
+  ---
+  duration_ms: 1784.156742
+  type: 'test'
+  ...
+# Subtest: CLI enabled-provider failure cannot fall back; explicit local remains usable
+ok 22 - CLI enabled-provider failure cannot fall back; explicit local remains usable
+  ---
+  duration_ms: 331.767117
+  type: 'test'
+  ...
+# Subtest: IPC rejects invalid authentication and secret forwarding before execution
+ok 23 - IPC rejects invalid authentication and secret forwarding before execution
+  ---
+  duration_ms: 18.848037
+  type: 'test'
+  ...
+# Subtest: client crash cancels a running process group and releases daemon lease
+ok 24 - client crash cancels a running process group and releases daemon lease
+  ---
+  duration_ms: 484.923438
+  type: 'test'
+  ...
+# Subtest: CLI exits when the command does not read its still-open stdin pipe
+ok 25 - CLI exits when the command does not read its still-open stdin pipe
+  ---
+  duration_ms: 534.812992
+  type: 'test'
+  ...
+# Subtest: reenable refreshes coordinator configuration without replacing project identity
+ok 26 - reenable refreshes coordinator configuration without replacing project identity
+  ---
+  duration_ms: 392.621101
+  type: 'test'
+  ...
+# Subtest: IPC cancel bypasses queued stdin writes to a non-reading process
+ok 27 - IPC cancel bypasses queued stdin writes to a non-reading process
+  ---
+  duration_ms: 548.246958
+  type: 'test'
+  ...
+# Subtest: two agents share one runtime and serialize source mutations
+ok 28 - two agents share one runtime and serialize source mutations
+  ---
+  duration_ms: 903.819489
+  type: 'test'
+  ...
+# Subtest: runtime failures never execute the local command
+ok 29 - runtime failures never execute the local command
+  ---
+  duration_ms: 13.101533
+  type: 'test'
+  ...
+# Subtest: abort propagates to process and releases active lease
+ok 30 - abort propagates to process and releases active lease
+  ---
+  duration_ms: 320.841273
+  type: 'test'
+  ...
+# Subtest: nonzero command still reconciles its generated source
+ok 31 - nonzero command still reconciles its generated source
+  ---
+  duration_ms: 353.487576
+  type: 'test'
+  ...
+# Subtest: destroy and recreate cannot interpret an empty runtime as local deletion
+ok 32 - destroy and recreate cannot interpret an empty runtime as local deletion
+  ---
+  duration_ms: 649.605657
+  type: 'test'
+  ...
+# Subtest: dev lease survives client response and stops explicitly
+ok 33 - dev lease survives client response and stops explicitly
+  ---
+  duration_ms: 307.564893
+  type: 'test'
+  ...
+# Subtest: idle callback queued before a new lease cannot stop active work
+ok 34 - idle callback queued before a new lease cannot stop active work
+  ---
+  duration_ms: 194.305512
+  type: 'test'
+  ...
+# Subtest: stop cancels active and queued foreground/dev commands
+ok 35 - stop cancels active and queued foreground/dev commands
+  ---
+  duration_ms: 497.356843
+  type: 'test'
+  ...
+# Subtest: shutdown cancels active and queued foreground/dev commands
+ok 36 - shutdown cancels active and queued foreground/dev commands
+  ---
+  duration_ms: 310.090565
+  type: 'test'
+  ...
+# Subtest: stop invalidates a command still preparing its runtime
+ok 37 - stop invalidates a command still preparing its runtime
+  ---
+  duration_ms: 74.621456
+  type: 'test'
+  ...
+# Subtest: stop cancels an already-running dev and foreground command before dev cleanup
+ok 38 - stop cancels an already-running dev and foreground command before dev cleanup
+  ---
+  duration_ms: 459.018233
+  type: 'test'
+  ...
+# Subtest: stop can cancel foreground while EOF never settles
+ok 39 - stop can cancel foreground while EOF never settles
+  ---
+  duration_ms: 236.917427
+  type: 'test'
+  ...
+# Subtest: stop can cancel dev while EOF never settles
+ok 40 - stop can cancel dev while EOF never settles
+  ---
+  duration_ms: 232.73417
+  type: 'test'
+  ...
+# Subtest: shutdown can cancel foreground while EOF never settles
+ok 41 - shutdown can cancel foreground while EOF never settles
+  ---
+  duration_ms: 231.074285
+  type: 'test'
+  ...
+# Subtest: shutdown can cancel dev while EOF never settles
+ok 42 - shutdown can cancel dev while EOF never settles
+  ---
+  duration_ms: 217.229293
+  type: 'test'
+  ...
+# Subtest: foreground executes from an empty nested local directory
+ok 43 - foreground executes from an empty nested local directory
+  ---
+  duration_ms: 329.310266
+  type: 'test'
+  ...
+# Subtest: dev executes from an empty nested local directory
+ok 44 - dev executes from an empty nested local directory
+  ---
+  duration_ms: 286.450805
+  type: 'test'
+  ...
+# Subtest: worker rejects outside cwd without following it or blaming Python
+ok 45 - worker rejects outside cwd without following it or blaming Python
+  ---
+  duration_ms: 38.42095
+  type: 'test'
+  ...
+# Subtest: worker rejects symlink cwd without following it or blaming Python
+ok 46 - worker rejects symlink cwd without following it or blaming Python
+  ---
+  duration_ms: 43.583365
+  type: 'test'
+  ...
+# Subtest: worker rejects file cwd without following it or blaming Python
+ok 47 - worker rejects file cwd without following it or blaming Python
+  ---
+  duration_ms: 40.208562
+  type: 'test'
+  ...
+# Subtest: valid empty cwd preserves missing executable error classification
+ok 48 - valid empty cwd preserves missing executable error classification
+  ---
+  duration_ms: 52.968674
+  type: 'test'
+  ...
+# Subtest: valid empty cwd preserves permission executable error classification
+ok 49 - valid empty cwd preserves permission executable error classification
+  ---
+  duration_ms: 53.759254
+  type: 'test'
+  ...
+# Subtest: new excludes forget only excluded baseline entries without deleting either copy
+ok 50 - new excludes forget only excluded baseline entries without deleting either copy
+  ---
+  duration_ms: 399.536314
+  type: 'test'
+  ...
+# Subtest: current excluded remote entries are rejected, including accept-local, before saving them
+ok 51 - current excluded remote entries are rejected, including accept-local, before saving them
+  ---
+  duration_ms: 122.614961
+  type: 'test'
+  ...
+# Subtest: illegal historical paths are rejected even if the new policy excludes them
+ok 52 - illegal historical paths are rejected even if the new policy excludes them
+  ---
+  duration_ms: 121.530173
+  type: 'test'
+  ...
+# Subtest: push safely converts directory-to-file, including nested empty directories
+ok 53 - push safely converts directory-to-file, including nested empty directories
+  ---
+  duration_ms: 311.660317
+  type: 'test'
+  ...
+# Subtest: push safely converts file-to-directory, including nested empty directories
+ok 54 - push safely converts file-to-directory, including nested empty directories
+  ---
+  duration_ms: 302.226127
+  type: 'test'
+  ...
+# Subtest: push conversion preserves secret-file instead of recursively deleting it
+ok 55 - push conversion preserves secret-file instead of recursively deleting it
+  ---
+  duration_ms: 294.291875
+  type: 'test'
+  ...
+# Subtest: push conversion preserves excluded-directory instead of recursively deleting it
+ok 56 - push conversion preserves excluded-directory instead of recursively deleting it
+  ---
+  duration_ms: 277.259175
+  type: 'test'
+  ...
+# Subtest: push conversion preserves excluded-symlink instead of recursively deleting it
+ok 57 - push conversion preserves excluded-symlink instead of recursively deleting it
+  ---
+  duration_ms: 250.094434
+  type: 'test'
+  ...
+# Subtest: push structural conflicts fail before changing user files
+ok 58 - push structural conflicts fail before changing user files
+  ---
+  duration_ms: 227.723742
+  type: 'test'
+  ...
+# Subtest: pull safely converts directory-to-file, including nested empty directories
+ok 59 - pull safely converts directory-to-file, including nested empty directories
+  ---
+  duration_ms: 292.834504
+  type: 'test'
+  ...
+# Subtest: pull safely converts file-to-directory, including nested empty directories
+ok 60 - pull safely converts file-to-directory, including nested empty directories
+  ---
+  duration_ms: 295.368939
+  type: 'test'
+  ...
+# Subtest: pull conversion preserves secret-file instead of recursively deleting it
+ok 61 - pull conversion preserves secret-file instead of recursively deleting it
+  ---
+  duration_ms: 240.004752
+  type: 'test'
+  ...
+# Subtest: pull conversion preserves excluded-directory instead of recursively deleting it
+ok 62 - pull conversion preserves excluded-directory instead of recursively deleting it
+  ---
+  duration_ms: 234.319069
+  type: 'test'
+  ...
+# Subtest: pull conversion preserves excluded-symlink instead of recursively deleting it
+ok 63 - pull conversion preserves excluded-symlink instead of recursively deleting it
+  ---
+  duration_ms: 215.716996
+  type: 'test'
+  ...
+# Subtest: pull structural conflicts fail before changing user files
+ok 64 - pull structural conflicts fail before changing user files
+  ---
+  duration_ms: 220.714075
+  type: 'test'
+  ...
+# Subtest: worker apply prepares directory-to-file and applies deletions before out-of-order writes
+ok 65 - worker apply prepares directory-to-file and applies deletions before out-of-order writes
+  ---
+  duration_ms: 47.021576
+  type: 'test'
+  ...
+# Subtest: worker apply prepares file-to-directory and applies deletions before out-of-order writes
+ok 66 - worker apply prepares file-to-directory and applies deletions before out-of-order writes
+  ---
+  duration_ms: 48.113353
+  type: 'test'
+  ...
+# Subtest: worker refuses an unplanned nonempty directory or stale file type
+ok 67 - worker refuses an unplanned nonempty directory or stale file type
+  ---
+  duration_ms: 85.857577
+  type: 'test'
+  ...
+# Subtest: local write rechecks user edits after preparing its backup/temp file
+ok 68 - local write rechecks user edits after preparing its backup/temp file
+  ---
+  duration_ms: 278.836621
+  type: 'test'
+  ...
+# Subtest: local delete rechecks user edits after preparing its backup/temp file
+ok 69 - local delete rechecks user edits after preparing its backup/temp file
+  ---
+  duration_ms: 148.125595
+  type: 'test'
+  ...
+# Subtest: push deletion refuses a local source recreated after scanning
+ok 70 - push deletion refuses a local source recreated after scanning
+  ---
+  duration_ms: 164.540809
+  type: 'test'
+  ...
+# Subtest: conversion retries after a partial failure without advancing the baseline
+ok 71 - conversion retries after a partial failure without advancing the baseline
+  ---
+  duration_ms: 339.215664
+  type: 'test'
+  ...
+# Subtest: real worker preserves argv cwd env stdout stderr and nonzero exit
+ok 72 - real worker preserves argv cwd env stdout stderr and nonzero exit
+  ---
+  duration_ms: 127.755328
+  type: 'test'
+  ...
+# Subtest: binary stdin streams without UTF-8 corruption
+ok 73 - binary stdin streams without UTF-8 corruption
+  ---
+  duration_ms: 123.370992
+  type: 'test'
+  ...
+# Subtest: stdout arrives before the process exits
+ok 74 - stdout arrives before the process exits
+  ---
+  duration_ms: 306.07271
+  type: 'test'
+  ...
+# Subtest: timeout kills real process and preserves classification
+ok 75 - timeout kills real process and preserves classification
+  ---
+  duration_ms: 256.199353
+  type: 'test'
+  ...
+# Subtest: cancel kills process group and waits for cleanup
+ok 76 - cancel kills process group and waits for cleanup
+  ---
+  duration_ms: 1312.324548
+  type: 'test'
+  ...
+# Subtest: transport disappearance fails closed rather than returns success
+ok 77 - transport disappearance fails closed rather than returns success
+  ---
+  duration_ms: 21.63318
+  type: 'test'
+  ...
+# Subtest: source push, remote formatter/lockfile pull, runtime cache exclusion
+ok 78 - source push, remote formatter/lockfile pull, runtime cache exclusion
+  ---
+  duration_ms: 324.366193
+  type: 'test'
+  ...
+# Subtest: large file transfer uses stdin, not operating-system argv limits
+ok 79 - large file transfer uses stdin, not operating-system argv limits
+  ---
+  duration_ms: 133.849408
+  type: 'test'
+  ...
+# Subtest: divergent changes stay intact with saved conflict evidence and explicit resolution
+ok 80 - divergent changes stay intact with saved conflict evidence and explicit resolution
+  ---
+  duration_ms: 386.922864
+  type: 'test'
+  ...
+# Subtest: deletions propagate both directions only when other side is unchanged
+ok 81 - deletions propagate both directions only when other side is unchanged
+  ---
+  duration_ms: 275.988849
+  type: 'test'
+  ...
+# Subtest: remote guarded write rejects stale hashes, traversal and secret paths
+ok 82 - remote guarded write rejects stale hashes, traversal and secret paths
+  ---
+  duration_ms: 296.958241
+  type: 'test'
+  ...
+# Subtest: local source limits and remote symlinks are explicit errors
+ok 83 - local source limits and remote symlinks are explicit errors
+  ---
+  duration_ms: 48.218654
+  type: 'test'
+  ...
+# Subtest: remote unconfirmed protocol cannot fabricate a successful command
+ok 84 - remote unconfirmed protocol cannot fabricate a successful command
+  ---
+  duration_ms: 17.11997
+  type: 'test'
+  ...
+# Subtest: control stays local: git status
+ok 85 - control stays local: git status
+  ---
+  duration_ms: 1.861868
+  type: 'test'
+  ...
+# Subtest: control stays local: npm publish
+ok 86 - control stays local: npm publish
+  ---
+  duration_ms: 0.204898
+  type: 'test'
+  ...
+# Subtest: control stays local: cargo login
+ok 87 - control stays local: cargo login
+  ---
+  duration_ms: 0.069592
+  type: 'test'
+  ...
+# Subtest: control stays local: pnpm config set
+ok 88 - control stays local: pnpm config set
+  ---
+  duration_ms: 0.161246
+  type: 'test'
+  ...
+# Subtest: control stays local: ssh host
+ok 89 - control stays local: ssh host
+  ---
+  duration_ms: 0.256747
+  type: 'test'
+  ...
+# Subtest: control stays local: docker build .
+ok 90 - control stays local: docker build .
+  ---
+  duration_ms: 0.074862
+  type: 'test'
+  ...
+# Subtest: runtime routes remotely: cargo test
+ok 91 - runtime routes remotely: cargo test
+  ---
+  duration_ms: 0.168158
+  type: 'test'
+  ...
+# Subtest: runtime routes remotely: pnpm test
+ok 92 - runtime routes remotely: pnpm test
+  ---
+  duration_ms: 0.345875
+  type: 'test'
+  ...
+# Subtest: runtime routes remotely: pytest -q
+ok 93 - runtime routes remotely: pytest -q
+  ---
+  duration_ms: 0.098036
+  type: 'test'
+  ...
+# Subtest: runtime routes remotely: cmake --build .
+ok 94 - runtime routes remotely: cmake --build .
+  ---
+  duration_ms: 0.669949
+  type: 'test'
+  ...
+# Subtest: runtime routes remotely: go test ./...
+ok 95 - runtime routes remotely: go test ./...
+  ---
+  duration_ms: 0.105671
+  type: 'test'
+  ...
+# Subtest: runtime routes remotely: mvn test
+ok 96 - runtime routes remotely: mvn test
+  ---
+  duration_ms: 0.057389
+  type: 'test'
+  ...
+# Subtest: shell quoting roundtrips argv without injection
+ok 97 - shell quoting roundtrips argv without injection
+  ---
+  duration_ms: 24.492788
+  type: 'test'
+  ...
+# Subtest: TOML layering handles tables arrays literal strings and comments
+ok 98 - TOML layering handles tables arrays literal strings and comments
+  ---
+  duration_ms: 2.775279
+  type: 'test'
+  ...
+# Subtest: reject unsupported or unsafe TOML x = 1\\nx = 2
+ok 99 - reject unsupported or unsafe TOML x = 1\\nx = 2
+  ---
+  duration_ms: 0.481432
+  type: 'test'
+  ...
+# Subtest: reject unsupported or unsafe TOML __proto__.polluted = true
+ok 100 - reject unsupported or unsafe TOML __proto__.polluted = true
+  ---
+  duration_ms: 0.10583
+  type: 'test'
+  ...
+# Subtest: reject unsupported or unsafe TOML x = 2026-10-06
+ok 101 - reject unsupported or unsafe TOML x = 2026-10-06
+  ---
+  duration_ms: 0.050806
+  type: 'test'
+  ...
+# Subtest: reject unsupported or unsafe TOML x = [broken]
+ok 102 - reject unsupported or unsafe TOML x = [broken]
+  ---
+  duration_ms: 0.042921
+  type: 'test'
+  ...
+# Subtest: config rejects unsupported fields and plaintext secret env
+ok 103 - config rejects unsupported fields and plaintext secret env
+  ---
+  duration_ms: 0.778865
+  type: 'test'
+  ...
+# Subtest: requested capabilities never vanish silently
+ok 104 - requested capabilities never vanish silently
+  ---
+  duration_ms: 0.192255
+  type: 'test'
+  ...
+# Subtest: environment forwards inline values without leaking ambient credentials
+ok 105 - environment forwards inline values without leaking ambient credentials
+  ---
+  duration_ms: 2.118785
+  type: 'test'
+  ...
+# Subtest: path stripping and cwd/argument mapping
+ok 106 - path stripping and cwd/argument mapping
+  ---
+  duration_ms: 0.410898
+  type: 'test'
+  ...
+# Subtest: reject unsafe relative path "../x"
+ok 107 - reject unsafe relative path "../x"
+  ---
+  duration_ms: 0.14787
+  type: 'test'
+  ...
+# Subtest: reject unsafe relative path "/etc/passwd"
+ok 108 - reject unsafe relative path "/etc/passwd"
+  ---
+  duration_ms: 0.053552
+  type: 'test'
+  ...
+# Subtest: reject unsafe relative path "a/../../b"
+ok 109 - reject unsafe relative path "a/../../b"
+  ---
+  duration_ms: 0.085773
+  type: 'test'
+  ...
+# Subtest: reject unsafe relative path "x\\\\..\\\\y"
+ok 110 - reject unsafe relative path "x\\\\..\\\\y"
+  ---
+  duration_ms: 0.246687
+  type: 'test'
+  ...
+# Subtest: reject unsafe relative path "a\\u0000b"
+ok 111 - reject unsafe relative path "a\\u0000b"
+  ---
+  duration_ms: 0.148782
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion .env
+ok 112 - protected sync exclusion .env
+  ---
+  duration_ms: 0.154051
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion .env.production
+ok 113 - protected sync exclusion .env.production
+  ---
+  duration_ms: 0.041839
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion .ssh/id_ed25519
+ok 114 - protected sync exclusion .ssh/id_ed25519
+  ---
+  duration_ms: 0.124987
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion x/node_modules/y
+ok 115 - protected sync exclusion x/node_modules/y
+  ---
+  duration_ms: 0.211491
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion target/release/a
+ok 116 - protected sync exclusion target/release/a
+  ---
+  duration_ms: 0.059102
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion .npmrc
+ok 117 - protected sync exclusion .npmrc
+  ---
+  duration_ms: 0.036439
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion config/private.pem
+ok 118 - protected sync exclusion config/private.pem
+  ---
+  duration_ms: 0.104117
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion build/a
+ok 119 - protected sync exclusion build/a
+  ---
+  duration_ms: 0.038623
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion .reroute/project.json
+ok 120 - protected sync exclusion .reroute/project.json
+  ---
+  duration_ms: 0.042972
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion .reroute-runtime/owner.json
+ok 121 - protected sync exclusion .reroute-runtime/owner.json
+  ---
+  duration_ms: 0.096393
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion .outboard/project.json
+ok 122 - protected sync exclusion .outboard/project.json
+  ---
+  duration_ms: 0.04757
+  type: 'test'
+  ...
+# Subtest: protected sync exclusion .outboard-runtime/owner.json
+ok 123 - protected sync exclusion .outboard-runtime/owner.json
+  ---
+  duration_ms: 0.03687
+  type: 'test'
+  ...
+# Subtest: symlink ancestor cannot escape local workspace
+ok 124 - symlink ancestor cannot escape local workspace
+  ---
+  duration_ms: 18.674644
+  type: 'test'
+  ...
+# Subtest: three-way source changes, deletion and conflict plan
+ok 125 - three-way source changes, deletion and conflict plan
+  ---
+  duration_ms: 0.744621
+  type: 'test'
+  ...
+# Subtest: queue serializes failures and subsequent operations
+ok 126 - queue serializes failures and subsequent operations
+  ---
+  duration_ms: 0.431878
+  type: 'test'
+  ...
+1..126
+# tests 126
+# suites 0
+# pass 126
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10306.97874
