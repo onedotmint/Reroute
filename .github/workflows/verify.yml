@@ -1,0 +1,46 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    env:
+      REROUTE_LIVE: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install isolated build tools
+        run: npm run tools:install
+      - name: Check committed dist before any build
+        run: npm run check:dist
+      - name: Strict types
+        run: npm run typecheck
+      - name: Real Daytona SDK declarations (no client or credentials)
+        run: npm run typecheck:sdk
+      - name: Build
+        run: npm run build
+      - name: All non-cloud tests
+        run: npm test
+      - name: CLI smoke
+        run: npm run smoke
+      - name: Tarball and clean offline prefix installation
+        run: npm run check:package

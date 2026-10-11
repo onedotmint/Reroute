@@ -13,7 +13,7 @@ import { findProject } from '../core/projects.js';
 import { RerouteError, invariant, safeMessage } from '../core/errors.js';
 import { createProvider } from '../providers/index.js';
 export const HARNESSES = ['pi', 'omp', 'claude', 'codex', 'deepseek', 'opencode', 'cursor'];
-export const SDKS = { daytona: '@daytona/sdk', modal: 'modal@0.11.0', e2b: 'e2b@2.52.1' };
+export const SDKS = { daytona: '@daytona/sdk@0.223.1', modal: 'modal@0.11.0', e2b: 'e2b@2.52.1' };
 export function agentHome() { return process.env.REROUTE_AGENT_HOME ?? homedir(); }
 export async function binary(name) {
     for (const folder of unshimmedPath(process.env.PATH, join(home(), 'shims')).split(delimiter)) {
@@ -174,7 +174,7 @@ export async function doctor(cwd, fix, probe) {
         add(name, await binary(name) ? 'FOUND' : 'MISSING', name === 'rsync' || name === 'mutagen' ? 'Optional; guarded native transfer is used' : 'Provider dependent');
     for (const [id, spec] of Object.entries(SDKS)) {
         try {
-            const name = spec.startsWith('@') ? spec : spec.split('@')[0];
+            const name = spec.replace(/@[^@/]+$/, '');
             createRequire(join(home(), 'sdk/package.json')).resolve(name);
             add(id + ' SDK', 'FOUND', spec);
         }

@@ -78,12 +78,13 @@ export async function providerFixture(id,f,t) {
     await fs.writeFile(join(bin,'sky'),`#!/usr/bin/env python3\nimport sys\nif sys.argv[1]=='status':print('fixture UP')\n`,{mode:0o700});
     return {provider:new SkyPilotProvider({remoteRoot:f.remote}),records};
   }
+  class DaytonaNotFoundError extends Error { statusCode = 404; }
   class Daytona {
-    async get(){if(!sandbox||state==='missing')throw notFound();return sandbox;}
+    async get(){if(!sandbox||state==='missing')throw new DaytonaNotFoundError('fixture not found');return sandbox;}
     async create(options){records.created.push(options);state='running';sandbox={id:'daytona-fixture',state:'started',
       start:async()=>{state='running';sandbox.state='started';},stop:async()=>{state='stopped';sandbox.state='stopped';},
-      setAutostopInterval:async value=>records.idle.push(value),createSshAccess:async()=>({token:'temporary-fixture-token'}),getPreviewLink:async()=>({url:'https://fixture.daytona.invalid'})};return sandbox;}
+      setAutostopInterval:async value=>records.idle.push(value),createSshAccess:async()=>({token:'temporary-fixture-token',sshCommand:'ssh temporary-fixture-token@ssh.app.daytona.io',expiresAt:new Date(Date.now()+30*60000)}),getPreviewLink:async()=>({url:'https://fixture.daytona.invalid',token:'preview-fixture-token'})};return sandbox;}
     async delete(){state='missing';records.deleted++;}
   }
-  return {provider:new DaytonaProvider({},async()=>({Daytona})),records};
+  return {provider:new DaytonaProvider({},async()=>({Daytona,DaytonaNotFoundError})),records};
 }

@@ -8,7 +8,7 @@ Reroute 是一个 TypeScript / Node.js 命令执行路由工具。它通过本�
 
 > 当前是预览版，不是生产就绪或云端兼容性认证。已有本地测试与真实 Python 子进程测试，但云 SDK 契约、真实远程主机和原生代理运行仍需实测。使用敏感或付费环境前，请阅读[安全说明](docs/SECURITY.md)与[已知限制](docs/LIMITATIONS.md)。
 
-**当前进度（2026-10-11）：** 最新修复已通过类型检查、154 项本地测试和 CLI smoke；真实 SSH / 云后端 / 原生代理及当前版本打包安装仍待验收。下一步先建立可追溯版本基线，再验证真实 SSH + Pi 链路，随后验证默认云后端 Daytona。详见[当前状态与验收清单](docs/PROJECT-REVIEW.md#当前状态2026-10-11)。
+**当前进度：** 首次检查点为 `a67c306`；正在按阶段完成真实 Daytona + Pi 验收前的硬化。当前结果、剩余限制和验收门槛以 [Pre-test hardening](docs/HARDENING.md) 为准；本地/SDK 声明验证不代表真实云端认证。
 
 ## 项目已有的能力
 
@@ -34,8 +34,8 @@ Reroute 是一个 TypeScript / Node.js 命令执行路由工具。它通过本�
 ```sh
 git clone https://github.com/onedotmint/Reroute.git
 cd Reroute
-npm install --prefix .tools --no-save typescript@5.8.3 @types/node@22
-npm run verify
+npm run tools:install
+npm run verify:release
 npm install -g .
 reroute --version
 ```

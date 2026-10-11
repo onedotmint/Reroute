@@ -14,7 +14,7 @@ import { RerouteError, invariant, errorCode, safeMessage } from '../core/errors.
 import { createProvider } from '../providers/index.js';
 export const HARNESSES = ['pi','omp','claude','codex','deepseek','opencode','cursor'] as const;
 export type Harness = typeof HARNESSES[number];
-export const SDKS: Record<string, string> = { daytona: '@daytona/sdk', modal: 'modal@0.11.0', e2b: 'e2b@2.52.1' };
+export const SDKS: Record<string, string> = { daytona: '@daytona/sdk@0.223.1', modal: 'modal@0.11.0', e2b: 'e2b@2.52.1' };
 export function agentHome(): string { return process.env.REROUTE_AGENT_HOME ?? homedir(); }
 export async function binary(name: string): Promise<string | undefined> {
   for (const folder of unshimmedPath(process.env.PATH, join(home(), 'shims')).split(delimiter)) {
@@ -128,7 +128,7 @@ export async function doctor(cwd: string, fix: boolean, probe: boolean): Promise
   add('host', process.platform === 'win32' ? 'EXPERIMENTAL' : 'OK', { node: process.version, platform: process.platform, home: home() });
   for (const name of ['ssh','python3','rsync','mutagen','sky']) add(name, await binary(name) ? 'FOUND' : 'MISSING', name === 'rsync' || name === 'mutagen' ? 'Optional; guarded native transfer is used' : 'Provider dependent');
   for (const [id, spec] of Object.entries(SDKS)) {
-    try { const name = spec.startsWith('@') ? spec : spec.split('@')[0]!; createRequire(join(home(), 'sdk/package.json')).resolve(name); add(id + ' SDK','FOUND',spec); }
+    try { const name = spec.replace(/@[^@/]+$/, ''); createRequire(join(home(), 'sdk/package.json')).resolve(name); add(id + ' SDK','FOUND',spec); }
     catch { add(id + ' SDK','MISSING',`reroute setup --install-sdk ${id}`); }
   }
   if (fix) { await installShims(); const previous = await readJSON<{ installed: Record<string,string> }>(join(home(), 'setup.json')); for (const id of Object.keys(previous?.installed ?? {})) if (HARNESSES.includes(id as Harness)) await installHarness(id as Harness); }

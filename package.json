@@ -36,9 +36,14 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "node scripts/build.mjs --check",
+    "tools:install": "npm install --prefix .tools --no-save --ignore-scripts --no-audit --no-fund typescript@5.8.3 @types/node@22 @daytona/sdk@0.223.1",
+    "typecheck:sdk": "node .tools/node_modules/typescript/bin/tsc --project tests/sdk/tsconfig.json",
     "test": "node --test --test-concurrency=4 tests/unit/*.test.mjs tests/contract/*.test.mjs tests/integration/*.test.mjs tests/harness/*.test.mjs",
     "test:live": "node --test tests/live/*.test.mjs",
-    "verify": "npm run typecheck && npm run build && npm test",
+    "check:dist": "node scripts/check-dist.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "verify": "npm run check:dist && npm run typecheck && npm run typecheck:sdk && npm run build && npm test",
+    "verify:release": "npm run verify && npm run smoke && npm run check:package",
     "smoke": "node bin/reroute.mjs --help",
     "package:source": "node scripts/package.mjs"
   },

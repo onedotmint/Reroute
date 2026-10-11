@@ -11,15 +11,21 @@ Use Node.js 22+ and Python 3 for worker integration tests:
 ```sh
 git clone https://github.com/onedotmint/Reroute.git
 cd Reroute
-npm install --prefix .tools --no-save typescript@5.8.3 @types/node@22
-npm run verify
-npm run smoke
+npm run tools:install
+npm run verify:release
 ```
 
 Build tools are kept in ignored `.tools/`; the core has no runtime npm dependencies.
 Build output is checked in so a source snapshot can run before installing a compiler.
 Edit `src/`, not `dist/`, and regenerate `dist/` before sharing a source change.
 `npm test` alone tests the compiled files; it does not rebuild TypeScript.
+`verify` checks `dist/` against a temporary build before rebuilding, then checks core
+and real pinned Daytona SDK declarations and runs every non-live suite. After editing
+source, run `npm run build` before `verify`; CI intentionally fails on stale committed
+output. `verify:release` also checks CLI smoke and an offline tarball installation in
+an isolated temporary HOME/prefix. GitHub Actions runs Node 22 and 24 with Python 3,
+read-only repository permissions and no cloud credentials. SDK declarations/errors
+are developer test inputs, not a new runtime dependency or live compatibility proof.
 
 Optional cloud SDKs are installed separately by `reroute setup --install-sdk ...`.
 Do not commit credentials, `.tools/`, provider SDK installs or machine-local state.

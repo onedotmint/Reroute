@@ -11,8 +11,15 @@ export async function loadSdk<T>(name: string): Promise<T> {
   const resolver = createRequire(join(home(), 'sdk', 'package.json'));
   let location: string;
   try { location = resolver.resolve(name); }
-  catch { throw new RerouteError('SDK_MISSING', `Missing ${name}. Run reroute setup --install-sdk ${name === '@daytona/sdk' ? 'daytona' : name}.`); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'MODULE_NOT_FOUND') throw error;
+    throw new RerouteError('SDK_MISSING', `Missing ${name}. Run reroute setup --install-sdk ${name === '@daytona/sdk' ? 'daytona' : name}.`);
+  }
   return await import(pathToFileURL(location).href) as T;
+}
+/** Daytona missing detection uses the loaded SDK's class, not names or transport-shaped objects. */
+export function sdkMissing(error: unknown, notFound: new (message: string, statusCode?: number) => Error & { statusCode?: number }): boolean {
+  return error instanceof notFound && error.statusCode === 404;
 }
 export function missing(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;

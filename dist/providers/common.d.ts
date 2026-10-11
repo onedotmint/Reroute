@@ -3,6 +3,10 @@ import { type Launch } from './channel.js';
 import type { RawProcess } from '../platform/process.js';
 /** SDKs are installed in a user-owned optional tool directory, not in every project. */
 export declare function loadSdk<T>(name: string): Promise<T>;
+/** Daytona missing detection uses the loaded SDK's class, not names or transport-shaped objects. */
+export declare function sdkMissing(error: unknown, notFound: new (message: string, statusCode?: number) => Error & {
+    statusCode?: number;
+}): boolean;
 export declare function missing(error: unknown): boolean;
 export declare function runtimeRef(provider: ProviderId, project: ProjectRef, id: unknown, root: string, meta?: Record<string, string>): RuntimeRef;
 export declare function rawCapture(raw: RawProcess): Promise<string>;
