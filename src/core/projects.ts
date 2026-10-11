@@ -13,6 +13,12 @@ export async function findProject(cwd: string): Promise<ProjectState | undefined
     if (data) {
       invariant(data.version === 1 && typeof data.enabled === 'boolean' && /^[a-f0-9-]{36}$/.test(data.project?.id ?? ''), 'PROJECT_STATE', 'Invalid project identity. Run reroute doctor.');
       invariant(data.project.root === path, 'PROJECT_MOVED', 'Project path changed or identity was copied. Run reroute enable --new-identity in the new location.');
+      if (data.runtime) {
+        const runtime = data.runtime;
+        invariant(runtime.provider === data.provider && runtime.projectId === data.project.id && typeof runtime.id === 'string' && runtime.id.length > 0 && runtime.id.length < 300 &&
+          typeof runtime.root === 'string' && runtime.root.startsWith('/') && !/[\0\r\n]/.test(runtime.root) && runtime.meta && typeof runtime.meta === 'object' && !Array.isArray(runtime.meta) &&
+          Object.values(runtime.meta).every(value => typeof value === 'string'), 'PROJECT_STATE', 'Stored runtime identity is invalid; preserve pending source and verify project/native ownership');
+      }
       return data;
     }
     if (dirname(path) === path) return undefined;

@@ -21,7 +21,7 @@ for(const id of ['daytona','ssh','skypilot','modal','e2b']) test(id+' shared pro
   const long=await provider.exec(runtime,{argv:['python3','-u','-c',"import time;print('ready');time.sleep(30)"],cwd:runtime.root,env:{}});
   await long.endInput();for await(const e of long.events){if(e.data.toString().includes('ready'))void long.cancel();}assert.equal((await long.wait()).cancelled,true);
   await provider.applyIdlePolicy(runtime,{active:true,minutes:10});await provider.applyIdlePolicy(runtime,{active:false,minutes:10});
-  if(id==='daytona'){assert.equal(records.created.length,1);assert.deepEqual(records.idle.slice(-2),[0,10]);assert.equal(records.created[0].autoStopInterval,10);}
+  if(id==='daytona'){assert.equal(records.created.length,1);assert.deepEqual(records.idle.slice(-2),[10,10]);assert.equal(records.created[0].autoStopInterval,10);assert.equal(records.created[0].autoDeleteInterval,-1);assert.equal(records.refresh,1);assert.ok(records.autoDelete.every(value=>value===-1));}
   if(id==='e2b'){assert.equal(records.created[0].lifecycle.onTimeout,'pause');assert.equal(records.created[0].timeoutMs,3600000);}
   if(id==='modal'){assert.ok(records.created[0].volumes[f.remote]);assert.equal(records.created[0].timeoutMs,86400000);}
   // Do not test automatic cloud provisioning in this suite. All native APIs above are fixtures.

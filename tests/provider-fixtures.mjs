@@ -81,9 +81,10 @@ export async function providerFixture(id,f,t) {
   class DaytonaNotFoundError extends Error { statusCode = 404; }
   class Daytona {
     async get(){if(!sandbox||state==='missing')throw new DaytonaNotFoundError('fixture not found');return sandbox;}
-    async create(options){records.created.push(options);state='running';sandbox={id:'daytona-fixture',state:'started',
+    async create(options){records.created.push(options);state='running';records.refresh=0;records.autoDelete=[];sandbox={id:'daytona-fixture',state:'started',labels:options.labels,sandboxClass:'container',gpu:0,spot:false,autoDeleteInterval:options.autoDeleteInterval,
       start:async()=>{state='running';sandbox.state='started';},stop:async()=>{state='stopped';sandbox.state='stopped';},
-      setAutostopInterval:async value=>records.idle.push(value),createSshAccess:async()=>({token:'temporary-fixture-token',sshCommand:'ssh temporary-fixture-token@ssh.app.daytona.io',expiresAt:new Date(Date.now()+30*60000)}),getPreviewLink:async()=>({url:'https://fixture.daytona.invalid',token:'preview-fixture-token'})};return sandbox;}
+      setAutoDeleteInterval:async value=>{records.autoDelete.push(value);sandbox.autoDeleteInterval=value;},refreshActivity:async()=>{records.refresh++;},
+      setAutostopInterval:async value=>records.idle.push(value),createSshAccess:async()=>({token:'temporary-fixture-token',sshCommand:'ssh temporary-fixture-token@ssh.app.daytona.io',expiresAt:new Date(Date.now()+30*60000)}),getPreviewLink:async()=>({url:'https://fixture.daytona.invalid',token:'preview-fixture-token'}),getSignedPreviewUrl:async()=>({url:'https://fixture.daytona.invalid',token:'preview-fixture-token'})};return sandbox;}
     async delete(){state='missing';records.deleted++;}
   }
   return {provider:new DaytonaProvider({},async()=>({Daytona,DaytonaNotFoundError})),records};

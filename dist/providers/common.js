@@ -59,6 +59,14 @@ if 'generation' not in data:
  data['generation']=str(uuid.uuid4())
  with open(f,'w') as o: json.dump(data,o)
 print(json.dumps({'root':p,'generation':data['generation']}))`;
+export const VERIFY_WORKSPACE = `import os,json,sys
+p=os.path.abspath(os.path.expanduser(sys.argv[1])); identity=sys.argv[2]; generation=sys.argv[3]
+assert os.path.realpath(p)==p and os.path.isdir(p), 'missing or symlink runtime root'
+s=os.path.join(p,'.reroute-runtime'); f=os.path.join(s,'owner.json')
+assert os.path.realpath(s)==s and os.path.realpath(f)==f, 'symlink owner marker'
+with open(f) as o: data=json.load(o)
+assert data['projectId']==identity and data['generation']==generation, 'workspace identity changed'
+print(json.dumps({'root':p,'projectId':data['projectId'],'generation':data['generation']}))`;
 export const DESTROY_DIRECTORY = `import os,json,sys,shutil
 p=os.path.abspath(os.path.expanduser(sys.argv[1])); identity=sys.argv[2]
 if not os.path.exists(p): sys.exit(0)
@@ -69,6 +77,28 @@ export class RemoteProvider {
     bridge = (runtime, argv) => this.launch(runtime, argv);
     exec(runtime, request) { return execute(this.bridge, runtime, request); }
     files(runtime) { return fileTransport(this.bridge, runtime); }
+    async verifyWorkspace(runtime) {
+        const generation = runtime.meta.workspaceGeneration;
+        invariant(typeof generation === 'string' && /^[a-f0-9-]{36}$/.test(generation), 'WORKSPACE_IDENTITY', 'Original workspace generation is missing; recover its recorded identity before restoring');
+        let output;
+        try {
+            output = await rawCapture(await this.launch(runtime, ['python3', '-c', VERIFY_WORKSPACE, runtime.root, runtime.projectId, generation]));
+        }
+        catch (error) {
+            if (error instanceof RerouteError && error.code === 'REMOTE_BOOTSTRAP')
+                throw new RerouteError('WORKSPACE_IDENTITY', 'Original workspace or owner marker is missing, unsafe or changed; inspect the original sandbox without initializing a replacement');
+            throw error;
+        }
+        let parsed;
+        try {
+            parsed = JSON.parse(output.trim());
+        }
+        catch {
+            throw new RerouteError('PROVIDER_WIRE', 'Invalid workspace verification response');
+        }
+        invariant(parsed.root === runtime.root && parsed.projectId === runtime.projectId && parsed.generation === generation, 'WORKSPACE_IDENTITY', 'Original workspace identity changed; restore the original owner marker and disk before retrying');
+        return runtime;
+    }
     async initialize(runtime) {
         const output = (await rawCapture(await this.launch(runtime, ['python3', '-c', INITIALIZE, runtime.root, runtime.projectId]))).trim();
         let parsed;

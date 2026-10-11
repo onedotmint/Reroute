@@ -51,7 +51,8 @@ export function validateConfig(input: unknown): ProjectConfig {
     invariant(PROVIDERS.includes(id as ProviderId) && object(options), 'CONFIG', 'Invalid provider options');
     known(options, OPTIONS[id as ProviderId], id);
     for (const [key, value] of Object.entries(options)) {
-      if (['port','sshPort','timeoutMs','cpuLimit','memoryLimitMiB','autoArchiveMinutes','autoDeleteMinutes'].includes(key)) invariant(typeof value === 'number' && Number.isFinite(value) && value >= 0, 'CONFIG', `${id}.${key} must be a nonnegative number`);
+      if (key === 'autoDeleteMinutes') invariant(value === -1, 'CONFIG', 'Daytona source workspaces require autoDeleteMinutes = -1 (disabled); auto-delete can destroy pending source');
+      else if (['port','sshPort','timeoutMs','cpuLimit','memoryLimitMiB','autoArchiveMinutes'].includes(key)) invariant(typeof value === 'number' && Number.isFinite(value) && value >= 0, 'CONFIG', `${id}.${key} must be a nonnegative number`);
       else if (key === 'ports') invariant(Array.isArray(value) && value.every(v => Number.isInteger(v) && v > 0 && v <= 65535), 'CONFIG', `${id}.ports must contain valid port numbers`);
       else if (key === 'secrets') invariant(Array.isArray(value) && value.every(v => typeof v === 'string' && v.length > 0), 'CONFIG', `${id}.secrets must contain native secret names, not values`);
       else if (key === 'volumes') invariant(Array.isArray(value) && value.every(v => object(v) && typeof v.volumeId === 'string' && typeof v.mountPath === 'string' && v.mountPath.startsWith('/') && Object.keys(v).every(k => ['volumeId','mountPath','subpath'].includes(k)) && (v.subpath === undefined || typeof v.subpath === 'string')), 'CONFIG', `${id}.volumes must contain volumeId, absolute mountPath and optional subpath`);

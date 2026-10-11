@@ -6,16 +6,17 @@ delivery environment, not every developer's current machine. The remaining gaps 
 
 1. **No live providers or native agent products tested here.** Registry/GitHub DNS
    failed in the runtime; cloud credentials and OpenSSH/SkyPilot/harness binaries
-   were absent. SDK wire types are structural local declarations, not real vendor
-   typechecking. Contract fixtures verify our mappings and real subprocess/file
+   were absent. Daytona now has pinned real-vendor declaration checks; other SDK boundaries
+   still use structural local declarations. Neither is live acceptance. Contract fixtures verify our mappings and real subprocess/file
    behavior, not vendor acceptance, native auth, previews or cloud persistence.
 2. **Not universally zero-config.** Remote Python 3 and project toolchains must
    exist. Provider auth is external. OpenCode v2 and DeepSeek need native activation;
    OMP only covers Bash; Codex requires a deliberate approval-related opt-in.
    Continue is unimplemented. No native-host compatibility matrix is certified.
 3. **Hard-crash billing gap.** An independent remote billing watchdog is absent.
-   Active Daytona/SkyPilot commands disable native idle; host loss can leave a
-   runtime on. Worker disconnect cleanup is not cloud shutdown. Use native budgets.
+   Daytona now keeps finite native auto-stop with active activity renewal (live
+   UNVERIFIED); SkyPilot active native idle remains disabled and can outlive host
+   loss. Worker disconnect cleanup is not cloud shutdown. Use native budgets.
 4. **Execution boundary is PATH, not arbitrary code analysis.** Absolute executables,
    overridden PATH, package-manager scripts that conceal deploy operations, unhooked
    Python tools and nested remote shell workflows are not comprehensively routed.
@@ -42,7 +43,7 @@ delivery environment, not every developer's current machine. The remaining gaps 
 9. **Platform/package limits.** Linux/POSIX runtime tested; native Windows and macOS
    not tested. Native Windows needs Git Bash and unverified ACL/pipe paths. The
    package was not published to npm. Builds use explicit local TS tooling; runtime
-   and Node tests are dependency-free. pnpm/Vitest were not installed/tested.
+   is dependency-free; release tests need isolated pinned developer SDK/tooling. pnpm/Vitest were not installed/tested.
 10. **Setup/doctor scope.** Discovery checks binaries/directories and repairs owned
     files; it is not exhaustive host-version conflict detection or cloud service
     diagnosis. Native authentication is presence-detected, not validated by setup.
@@ -50,5 +51,5 @@ delivery environment, not every developer's current machine. The remaining gaps 
 
 These are not hidden TODO provider classes: actual implementations live in
 `src/providers/`, shared local contracts run, and the archive is executable. The
-next release gate is credentialed provider/harness validation and the hard-crash
-billing safeguard, not additional interface scaffolding.
+next gate after local hardening is controlled credentialed provider/harness validation,
+including native crash-stop, retained-disk recovery and billing evidence.

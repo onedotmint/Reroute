@@ -7,7 +7,7 @@ them. **No provider is labelled live verified in this delivery.**
 
 | Provider | Local prerequisites | Resource mapping | Persistence / idle | Preview |
 | --- | --- | --- | --- | --- |
-| Daytona | optional TS SDK, OpenSSH, native API key | CPU, MiB->GiB RAM, disk, GPU, target/region, image; snapshot constraints; GPU spot only | sandbox disk; native autostop disabled while active, stop after idle | native HTTPS preview |
+| Daytona | pinned optional TS SDK, OpenSSH, native API key | CPU, MiB->GiB RAM, disk, target/region, image; verified CPU-container snapshots; GPU/Spot/VM rejected | disk retained on stop/archive; finite native auto-stop plus active activity renewal; no auto-delete/TTL | five-minute signed HTTPS preview |
 | SSH | OpenSSH config/agent, known host key | no resource provisioning; explicit sizing requests rejected | isolated directory; never shuts down host | localhost SSH forwarding |
 | SkyPilot | `sky`, OpenSSH, native cloud auth | SkyPilot resources/infra/instance/disk/image/accelerators/spot | cluster disk on stop; spot autodown can lose disk | SkyPilot-generated SSH config and forwarding |
 | Modal | optional JS SDK, native token/profile | CPU/memory reservation and limits, GPU, regions, image | named volume; terminate/recreate, not VM suspend/resume | predeclared encrypted ports/tunnels |
@@ -27,11 +27,16 @@ Use `providers.daytona.target` or portable `runtime.region`, not a fabricated
 universal region name. Snapshot resources are fixed: the adapter rejects portable
 image/resource overrides combined with a snapshot.
 
-`ensureReady` discovers by stable name before creation, then initializes an owned
-workspace. Sessions use short-lived SSH access, refreshed in local memory. CPU
+`ensureReady` checks the stable name before creation, then initializes a newly created owned
+workspace. A named sandbox with no recorded runtime/generation is not silently adopted;
+recover the original project state or back up its files through native tools. Sessions use short-lived SSH access, refreshed in local memory. CPU
 work and source transfer use one shared supervised SSH channel abstraction, not
-a second independent Daytona sync system. `autoArchiveMinutes` and
-`autoDeleteMinutes` are opt-in native lifecycle settings, not Reroute defaults.
+a second independent Daytona sync system. `autoArchiveMinutes` is an opt-in native archive policy.
+`autoDeleteMinutes` may only be `-1` (disabled). Active native auto-stop remains finite
+(at least five minutes); serialized activity refresh runs every minute while leased.
+Stop/archive retain disk under the documented CPU-container contract; restoration
+checks original ID, label, root and generation without creating/repairing an owner marker.
+These persistence and billing behaviors are live **UNVERIFIED**.
 Native volumes use `volumeId`, absolute `mountPath`, optional `subpath`.
 
 The release does not expose every Daytona snapshot/secret/pause feature. Native
@@ -97,7 +102,8 @@ allocation parameter is sent to the template API.
 ## Verification and operational boundary
 
 `docs/REFERENCES.md` and `sdk-versions.json` record inspected upstream contracts.
-SDKs were not installed in the delivery environment; structural declarations are
-ours, not proof of vendor type compatibility. Run opt-in live tests before relying
+Daytona's pinned SDK is installed only in isolated developer tooling and its real
+declarations are typechecked. Other vendor boundaries still use local structural fixtures.
+Neither kind of check is proof of live vendor compatibility. Run opt-in live tests before relying
 on a provider, including preview, long-lived leases and native auth in your account.
 No cloud registration, paid provisioning or account mutation was performed here.

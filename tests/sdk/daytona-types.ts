@@ -36,7 +36,21 @@ async function callShapes() {
   await actualSandbox.stop(60);
   await actualSandbox.setAutostopInterval(10);
   await actualSandbox.refreshActivity();
+  await actualSandbox.setAutoDeleteInterval(-1);
+  await sandbox.refreshActivity();
+  await sandbox.setAutoDeleteInterval(-1);
+  const labels: Record<string, string> = actualSandbox.labels;
+  const sandboxClass: DaytonaSandbox['sandboxClass'] = actualSandbox.sandboxClass;
+  const gpu: number = actualSandbox.gpu;
+  const spot: boolean | undefined = actualSandbox.spot;
+  const autoDelete: number | undefined = actualSandbox.autoDeleteInterval;
+  const deadline: string | undefined = actualSandbox.autoDestroyAt;
+  const lifecycleBase: ActualSdk.CreateSandboxBaseParams = { autoDeleteInterval: -1, ttlMinutes: 0, ephemeral: false, spot: false };
+  void [labels, sandboxClass, gpu, spot, autoDelete, deadline, lifecycleBase];
   const preview: { url: string; token: string } = await actualSandbox.getPreviewLink(3000);
+  const signedPreview: { url: string; token: string } = await actualSandbox.getSignedPreviewUrl(3000, 300);
+  const boundaryPreview: { url: string; token: string } = await sandbox.getSignedPreviewUrl(3000, 300);
+  void signedPreview; void boundaryPreview;
   const ssh: { token: string; sshCommand: string; expiresAt: Date } = await actualSandbox.createSshAccess(30);
   return { sdkBoundary, sandboxBoundary, vendorBase, vendorState, boundaryState, vendorGpu, unsupportedGpu, preview, ssh };
 }

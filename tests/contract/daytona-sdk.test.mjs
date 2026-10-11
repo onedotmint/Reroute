@@ -16,25 +16,30 @@ import {
 
 const project = { id: 'sdk-project', name: 'sdk-project', root: '/local' };
 const spec = { idleTimeoutMinutes: 10, env: { CI: '1' } };
-const runtime = { provider: 'daytona', projectId: project.id, id: 'sandbox-id', root: '/remote', meta: {} };
-function boundary({ getError, state = 'started', createdState = 'started', startState = 'started', options = {} } = {}) {
-  const calls = { config: [], get: [], create: [], start: [], stop: [], delete: [], idle: [], initialized: 0 };
+const runtime = { provider: 'daytona', projectId: project.id, id: 'sandbox-id', root: '/remote', meta: { workspaceGeneration: '11111111-1111-4111-8111-111111111111' } };
+function boundary({ getError, state = 'started', createdState = 'started', startState = 'started', options = {}, snapshotMetadata = { sandboxClass: 'container', resources: { cpu: 2 } } } = {}) {
+  const calls = { config: [], get: [], create: [], start: [], stop: [], delete: [], idle: [], autoDelete: [], refresh: 0, verified: 0, initialized: 0 };
   const sandbox = {
-    id: runtime.id, state,
+    id: runtime.id, state, labels: { 'reroute.project': project.id }, sandboxClass: 'container', gpu: 0, spot: false, autoDeleteInterval: -1,
     async start(timeout) { calls.start.push(timeout); this.state = startState; },
     async stop(timeout) { calls.stop.push(timeout); this.state = 'stopped'; },
     async setAutostopInterval(minutes) { calls.idle.push(minutes); },
+    async setAutoDeleteInterval(minutes) { calls.autoDelete.push(minutes); this.autoDeleteInterval = minutes; },
+    async refreshActivity() { calls.refresh++; },
     async createSshAccess() { return { token: 'short-lived', sshCommand: 'ssh short-lived@ssh.app.daytona.io', expiresAt: new Date(Date.now() + 1800000) }; },
     async getPreviewLink() { return { url: 'https://preview.daytona.invalid', token: 'private-preview-token' }; },
+    async getSignedPreviewUrl(port, expires) { assert.equal(port, 3000); assert.equal(expires, 300); return { url: 'https://preview.daytona.invalid', token: 'private-preview-token' }; },
   };
   class Daytona {
     constructor(config) { calls.config.push(config); }
+    snapshot = { get: async () => snapshotMetadata };
     async get(id) { calls.get.push(id); if (getError) throw getError; return sandbox; }
     async create(params, options) { calls.create.push({ params, options }); sandbox.state = createdState; return sandbox; }
     async delete(sandbox, timeout) { calls.delete.push({ sandbox, timeout }); }
   }
   class Provider extends DaytonaProvider {
     async initialize(runtime) { calls.initialized++; return runtime; }
+    async verifyWorkspace(runtime) { calls.verified++; return runtime; }
   }
   return { provider: new Provider(options, async () => ({ Daytona, DaytonaNotFoundError })), calls, sandbox };
 }
@@ -75,18 +80,18 @@ test('only real typed HTTP 404 provisions; create has a 60-second operation time
   assert.equal((await provider.ensureReady(project, spec)).id, runtime.id);
   assert.equal(calls.get.at(-1), 'reroute-' + project.id);
   assert.deepEqual(calls.config, [{ target: undefined, requestTimeoutMs: 30000 }]);
-  assert.deepEqual(calls.create, [{ params: { name: 'reroute-' + project.id, labels: { 'reroute.project': project.id }, envVars: spec.env, autoStopInterval: 10 }, options: { timeout: 60 } }]);
+  assert.deepEqual(calls.create, [{ params: { name: 'reroute-' + project.id, labels: { 'reroute.project': project.id }, envVars: spec.env, autoStopInterval: 10, autoDeleteInterval: -1, ttlMinutes: 0, ephemeral: false, spot: false }, options: { timeout: 60 } }]);
 });
 
 test('Daytona image/resource and snapshot create shapes remain explicit', async () => {
   const getError = new DaytonaNotFoundError('missing', 404);
-  const image = boundary({ getError, options: { autoArchiveMinutes: 60, autoDeleteMinutes: 120, volumes: [{ volumeId: 'v', mountPath: '/data', subpath: 'results' }] } });
-  await image.provider.ensureReady(project, { ...spec, image: 'python:3.12-slim', cpu: 4, memoryMiB: 8192, diskGiB: 30, gpu: { type: 'H100', count: 2 }, spot: true, region: 'us' });
+  const image = boundary({ getError, options: { autoArchiveMinutes: 60, autoDeleteMinutes: -1, volumes: [{ volumeId: 'v', mountPath: '/data', subpath: 'results' }] } });
+  await image.provider.ensureReady(project, { ...spec, image: 'python:3.12-slim', cpu: 4, memoryMiB: 8192, diskGiB: 30, spot: false, region: 'us' });
   const params = image.calls.create[0].params;
   assert.equal(params.image, 'python:3.12-slim');
-  assert.deepEqual(params.resources, { cpu: 4, memory: 8, disk: 30, gpu: 2, gpuType: 'H100' });
-  assert.equal(params.autoArchiveInterval, 60); assert.equal(params.autoDeleteInterval, 120);
-  assert.equal(params.spot, true); assert.deepEqual(params.volumes, [{ volumeId: 'v', mountPath: '/data', subpath: 'results' }]);
+  assert.deepEqual(params.resources, { cpu: 4, memory: 8, disk: 30 });
+  assert.equal(params.autoArchiveInterval, 60); assert.equal(params.autoDeleteInterval, -1); assert.equal(params.ttlMinutes, 0);
+  assert.equal(params.spot, false); assert.deepEqual(params.volumes, [{ volumeId: 'v', mountPath: '/data', subpath: 'results' }]);
   assert.equal(image.calls.config[0].target, 'us');
   const snapshot = boundary({ getError, options: { snapshot: 'snapshot-id' } });
   await snapshot.provider.ensureReady(project, spec);
@@ -94,7 +99,7 @@ test('Daytona image/resource and snapshot create shapes remain explicit', async 
   assert.equal('resources' in snapshot.calls.create[0].params, false);
   await assert.rejects(snapshot.provider.ensureReady(project, { ...spec, cpu: 1 }), /snapshot resources are fixed/);
   const unsupported = boundary({ getError });
-  await assert.rejects(unsupported.provider.ensureReady(project, { ...spec, gpu: { type: 'A100' } }), /supported GPU type/);
+  await assert.rejects(unsupported.provider.ensureReady(project, { ...spec, gpu: { type: 'A100' } }), /GPU\/Spot/);
   assert.deepEqual(unsupported.calls.config, []);
 });
 
@@ -117,14 +122,14 @@ test('Daytona creation/start must report started before workspace initialization
   assert.deepEqual(started.calls.start, [60]); assert.equal(started.calls.initialized, 0);
 });
 
-for (const state of ['stopped', 'archived']) test(`Daytona ${state} start and idle stop are explicitly bounded; old idle behavior preserved`, async () => {
+for (const state of ['stopped', 'archived']) test(`Daytona ${state} start and idle stop are bounded with finite native timers`, async () => {
   const { provider, calls } = boundary({ state });
   await provider.ensureReady(project, spec, runtime);
   assert.deepEqual(calls.start, [60]);
   await provider.applyIdlePolicy(runtime, { active: true, minutes: 10 });
   await provider.applyIdlePolicy(runtime, { active: false, minutes: 2.2 });
   await provider.applyIdlePolicy(runtime, { active: false, minutes: 0 });
-  assert.deepEqual(calls.idle, [0, 3, 1]); assert.deepEqual(calls.stop, [60]);
+  assert.deepEqual(calls.idle, [10, 10, 3, 1]); assert.deepEqual(calls.autoDelete, [-1, -1, -1, -1]); assert.equal(calls.refresh, 1); assert.deepEqual(calls.stop, [60]);
   await provider.destroy(runtime);
   assert.equal(calls.delete[0].timeout, 60);
   assert.equal(await provider.preview(runtime, 3000), 'https://preview.daytona.invalid');
@@ -147,4 +152,10 @@ test('SDK loader reports the corrected Daytona install command without hiding im
   const realSdk = await loadSdk('@daytona/sdk');
   assert.equal(typeof realSdk.Daytona, 'function');
   assert.equal(typeof realSdk.DaytonaNotFoundError, 'function');
+});
+
+for (const snapshotMetadata of [{ sandboxClass: 'linux-vm', resources: {} }, { sandboxClass: 'container', resources: { gpu: { count: 1 } } }, { sandboxClass: 'container' }, { resources: {} }]) test('unsafe snapshot metadata fails before provisioning: ' + JSON.stringify(snapshotMetadata), async () => {
+  const f = boundary({ getError: new DaytonaNotFoundError('missing', 404), options: { snapshot: 'unsafe' }, snapshotMetadata });
+  await assert.rejects(f.provider.ensureReady(project, spec), e => e.code === 'UNSUPPORTED_CAPABILITY');
+  assert.equal(f.calls.create.length, 0); assert.equal(f.calls.initialized, 0);
 });

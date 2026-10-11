@@ -17,6 +17,8 @@ export interface DaytonaCreateBaseParams {
         subpath?: string;
     }[];
     spot?: boolean;
+    ephemeral?: boolean;
+    ttlMinutes?: number;
 }
 export interface DaytonaCreateImageParams extends DaytonaCreateBaseParams {
     image: string;
@@ -35,9 +37,17 @@ export type DaytonaCreateParams = DaytonaCreateImageParams | DaytonaCreateSnapsh
 export interface DaytonaSandbox {
     id: string;
     state?: DaytonaSandboxState;
+    labels: Record<string, string>;
+    sandboxClass?: 'container' | 'linux-vm' | 'windows' | '11184809';
+    gpu: number;
+    spot?: boolean;
+    autoDeleteInterval?: number;
+    autoDestroyAt?: string;
     start(timeout?: number): Promise<void>;
     stop(timeout?: number): Promise<void>;
     setAutostopInterval(minutes: number): Promise<void>;
+    setAutoDeleteInterval(minutes: number): Promise<void>;
+    refreshActivity(): Promise<void>;
     createSshAccess(minutes: number): Promise<{
         token: string;
         sshCommand: string;
@@ -47,9 +57,21 @@ export interface DaytonaSandbox {
         url: string;
         token: string;
     }>;
+    getSignedPreviewUrl(port: number, expiresInSeconds?: number): Promise<{
+        url: string;
+        token: string;
+    }>;
 }
 export interface DaytonaClient {
     get(id: string): Promise<DaytonaSandbox>;
+    snapshot: {
+        get(name: string): Promise<{
+            sandboxClass?: DaytonaSandbox['sandboxClass'];
+            resources?: {
+                gpu?: unknown;
+            };
+        }>;
+    };
     create(params: DaytonaCreateParams, options?: {
         timeout?: number;
     }): Promise<DaytonaSandbox>;
@@ -84,6 +106,13 @@ export declare class DaytonaProvider extends RemoteProvider {
     constructor(options?: DaytonaProviderOptions, sdkLoader?: () => Promise<DaytonaSdk>);
     private sdk;
     private missing;
+    private validateSpec;
+    private validateRuntime;
+    private validateSandbox;
+    private owned;
+    private preserve;
+    private start;
+    restore(project: ProjectRef, spec: RuntimeSpec, runtime: RuntimeRef): Promise<RuntimeRef>;
     ensureReady(project: ProjectRef, spec: RuntimeSpec, previous?: RuntimeRef): Promise<RuntimeRef>;
     launch(runtime: RuntimeRef, argv: string[]): Promise<RawProcess>;
     status(runtime: RuntimeRef): Promise<RuntimeStatus>;

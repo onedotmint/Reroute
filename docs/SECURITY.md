@@ -60,23 +60,26 @@ execution path available to an agent.
 
 Graceful idle/shutdown behavior is implemented; the latest release fixes passed
 local regression tests on 2026-10-11, not live cloud validation (see PROJECT-REVIEW).
-Active Daytona and SkyPilot native autostop are disabled so long commands/dev servers are not
-killed by timers that ignore internal activity. **A hard laptop/daemon crash can
-leave those native idle controls disabled until recovery.** The remote worker's
-heartbeat can kill the project process, but cannot re-authenticate and restore a
-cloud billing policy. There is no independent cloud watchdog in this preview.
+Daytona keeps finite native auto-stop (at least five minutes while active), with
+serialized one-minute activity renewal. Daemon loss stops renewal; documented
+CPU-container stop/archive preserves disk. GPU/Spot/VM/TTL source workspaces and
+auto-delete are rejected. Native behavior and billing remain live **UNVERIFIED**.
+SkyPilot still disables active native autostop; a hard host crash can leave it running.
+Worker heartbeat cleanup is not cloud shutdown. There is no independent cloud watchdog.
 
 Failed source reconciliation keeps a persisted `syncPending` marker and a protective
 lease instead of arming destructive idle. `reroute status` exposes this state; resolve
 conflicts/transport failures and synchronize to release it. A stopped original runtime
-must be resumed natively; Reroute will not create an empty replacement or delete it
-without reconciliation. Shutdown attempts a final sync; failure leaves the marker and
+can be resumed by `reroute sync` for Daytona after original ID/ownership/generation
+validation; other providers without restoration require native resume. Reroute will
+not create an empty replacement or delete it without reconciliation. Shutdown attempts a final sync; failure leaves the marker and
 native active policy, rather than knowingly cleaning up unsaved source. This can keep
 resources billable. It is not an independent watchdog or an unlimited preservation
 promise: E2B/Modal plan and lifetime limits, API failures, and host loss still apply.
 Keep native backups and recover pending source promptly.
 
-Use provider-side budgets, alerts and maximum-lifetime controls. Check native
+Use provider-side budgets and alerts. Do not put destructive maximum-lifetime controls
+on source workspaces with pending changes; Daytona hard TTL is intentionally unsupported. Check native
 provider state after a host crash. Modal has a finite sandbox lifetime, not a VM
 idle setting. E2B has native timeout/plan limits. SSH idle does not power off a
 machine. Named Modal volumes remain after runtime deletion and may retain data or

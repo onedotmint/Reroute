@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import type { ProjectState, ProjectConfig, ProviderId, RuntimeProvider, ExecutionHandle, ExecutionEvent, ExecutionExit, ProviderFactory } from './contracts.js';
+import type { ProjectState, ProjectConfig, ProviderId, RuntimeProvider, RuntimeRef, ExecutionHandle, ExecutionEvent, ExecutionExit, ProviderFactory } from './contracts.js';
 import { ProjectStore, findProject } from './projects.js';
 import { loadConfig } from '../config/config.js';
 import { SerialLane } from './queue.js';
@@ -81,18 +81,49 @@ export class Coordinator {
       return result;
     } catch (error) { entry.error = safeMessage(error); throw error; }
   }
+  private validateRuntime(entry: Entry, runtime: RuntimeRef): void {
+    invariant(runtime.provider === entry.state.provider && runtime.provider === entry.provider.id && runtime.projectId === entry.state.project.id,
+      'WRONG_RUNTIME', 'Runtime identity does not belong to this project/provider; no replacement or destruction was attempted');
+  }
   private async ready(entry: Entry, existingOnly = false): Promise<void> {
+    const retained = existingOnly || entry.state.syncPending;
     invariant(!entry.state.syncPending || entry.state.runtime, 'SOURCE_PENDING', 'Pending source has no recorded runtime; recover its original state instead of creating a replacement');
-    if ((existingOnly || entry.state.syncPending) && entry.state.runtime) invariant(await entry.provider.status(entry.state.runtime) === 'running', 'SOURCE_PENDING', 'Resume the original runtime with native provider tools before synchronizing pending source; no replacement was created');
-    if (entry.warm && entry.state.runtime && Date.now() - entry.verifiedAt > 5000) {
-      const status = await entry.provider.status(entry.state.runtime);
-      invariant(status !== 'unknown', 'RUNTIME_UNKNOWN', 'Runtime status could not be established. No local fallback was used.');
-      if (status !== 'running') { entry.warm = false; entry.lifecycle?.dispose(); }
-      entry.verifiedAt = Date.now();
+    const previous = entry.state.runtime;
+    let restored: RuntimeRef | undefined;
+    if (previous) {
+      this.validateRuntime(entry, previous);
+      if (!entry.warm || retained || Date.now() - entry.verifiedAt > 5000) {
+        const status = await entry.provider.status(previous);
+        invariant(status !== 'unknown', 'RUNTIME_UNKNOWN', 'Runtime status could not be established. Check native connectivity; no replacement was created.');
+        if (status !== 'running') { entry.warm = false; entry.lifecycle?.dispose(); entry.pendingRelease = undefined; }
+        if (status === 'stopped' || status === 'archived' || (status === 'running' && retained && !entry.warm && entry.provider.restore)) {
+          if (entry.provider.restore) {
+            const generation = entry.generation;
+            invariant(!this.closing, 'CANCELLED', 'Coordinator is shutting down; original runtime was not resumed');
+            invariant(typeof previous.meta.workspaceGeneration === 'string' && previous.meta.workspaceGeneration.length > 0,
+              'WRONG_RUNTIME', 'Original workspace generation is missing; verify native workspace ownership before recovery');
+            try { restored = await entry.provider.restore(entry.state.project, entry.config.runtime, structuredClone(previous)); }
+            catch (error) {
+              entry.error = safeMessage(error);
+              if (error instanceof RerouteError) throw error;
+              throw new RerouteError('RUNTIME_RESTORE', `Could not resume original ${previous.provider} runtime ${previous.id}. Check native authentication/connectivity, then retry reroute sync; no replacement was created.`);
+            }
+            invariant(!this.closing && generation === entry.generation, 'CANCELLED', 'Recovery was interrupted; original runtime and pending source were retained');
+            this.validateRuntime(entry, restored);
+            invariant(restored.id === previous.id && restored.root === previous.root && restored.meta.workspaceGeneration === previous.meta.workspaceGeneration,
+              'WRONG_RUNTIME', 'Recovery changed the runtime identity or workspace generation; pending source and baseline were retained');
+            invariant(await entry.provider.status(restored) === 'running', 'RUNTIME_RESTORE', 'Original runtime is not running after recovery; check native state and retry reroute sync');
+            invariant(!this.closing && generation === entry.generation, 'CANCELLED', 'Recovery was interrupted; original runtime and pending source were retained');
+          } else invariant(!retained, 'SOURCE_PENDING', 'This provider cannot safely resume the original runtime. Resume it with native tools, then reroute sync; no replacement was created');
+        } else invariant(!(retained && status === 'missing'), 'SOURCE_PENDING', 'Original runtime is missing; recover its native backup. Pending source cannot be replaced by an empty runtime');
+        entry.verifiedAt = Date.now();
+      }
     }
     if (entry.warm) return;
-    const runtime = (existingOnly || entry.state.syncPending) && entry.state.runtime ? entry.state.runtime : await entry.provider.ensureReady(entry.state.project, entry.config.runtime, entry.state.runtime);
-    invariant(runtime.provider === entry.state.provider && runtime.projectId === entry.state.project.id, 'WRONG_RUNTIME', 'Provider returned the wrong project runtime');
+    const runtime = restored ?? (retained && previous ? previous : await entry.provider.ensureReady(entry.state.project, entry.config.runtime, previous));
+    this.validateRuntime(entry, runtime);
+    if (retained && previous) invariant(runtime.id === previous.id && runtime.root === previous.root && runtime.meta.workspaceGeneration === previous.meta.workspaceGeneration,
+      'WRONG_RUNTIME', 'Retained source requires the original runtime and workspace generation');
     // If an ephemeral runtime was recreated, its empty filesystem is not a deletion of local source.
     if (!entry.state.runtime || entry.state.runtime.id !== runtime.id || entry.state.runtime.meta.workspaceGeneration !== runtime.meta.workspaceGeneration) {
       await fs.rm(`${entry.state.project.root}/.reroute/sync-base.json`, { force: true });
@@ -101,7 +132,7 @@ export class Coordinator {
     entry.lifecycle?.dispose(); entry.pendingRelease = undefined;
     entry.lifecycle = new Lifecycle(entry.provider, runtime, entry.config.runtime.idleTimeoutMinutes,
       () => { entry.warm = false; },
-      error => { entry.error = safeMessage(error); for (const handle of entry.active.values()) void handle.cancel(); void log('lifecycle_error', { project: entry.state.project.id }); }, operation => entry.lane.run(operation));
+      error => { entry.error = safeMessage(error); entry.warm = false; entry.lifecycle?.dispose(); for (const handle of entry.active.values()) void handle.cancel(); void log('lifecycle_error', { project: entry.state.project.id }); }, operation => entry.lane.run(operation));
     entry.warm = true; entry.verifiedAt = Date.now(); entry.error = undefined;
     if (entry.state.syncPending) await this.protectSource(entry);
   }
@@ -239,8 +270,9 @@ export class Coordinator {
         // Never discard generated source if cancellation/startup reconciliation failed.
         const status = await entry.provider.status(entry.state.runtime);
         invariant(status !== 'unknown', 'RUNTIME_UNKNOWN', 'Runtime status could not be established; no stop or destruction was attempted');
-        invariant(status === 'running' || (!entry.state.syncPending && (!destroy || status === 'missing')), 'SOURCE_PENDING', 'Resume the original runtime with native provider tools and synchronize before destroying it');
-        if (status === 'running') { await this.ready(entry, true); await this.reconcile(entry); }
+        const resumable = (status === 'stopped' || status === 'archived') && !!entry.provider.restore;
+        invariant(status === 'running' || resumable || (!entry.state.syncPending && (!destroy || status === 'missing')), 'SOURCE_PENDING', 'Resume the original runtime with native provider tools and synchronize before destroying it');
+        if (status === 'running' || resumable) { await this.ready(entry, true); await this.reconcile(entry); }
         entry.lifecycle?.dispose(); entry.pendingRelease = undefined;
         if (destroy) { await entry.provider.destroy(entry.state.runtime); delete entry.state.runtime; }
         else await entry.provider.applyIdlePolicy(entry.state.runtime, { active: false, minutes: 0 });
@@ -298,6 +330,7 @@ export class Coordinator {
           if (entry.state.project.id !== state.project.id || entry.state.provider !== state.provider || entry.state.runtime?.id !== state.runtime!.id) return;
           const status = await entry.provider.status(state.runtime!);
           if (status === 'running') { await this.ready(entry); await entry.lifecycle!.arm(); }
+          else if (entry.state.syncPending) entry.error = 'Original runtime has pending source. Run reroute sync to resume a supported stopped/archived runtime; otherwise recover it with native tools. No replacement was created.';
         });
       } catch { await log('recovery_needs_attention', { project: state.project.id }); }
     }

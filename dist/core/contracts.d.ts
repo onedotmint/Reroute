@@ -1,7 +1,7 @@
 /** All provider/harness-independent contracts. Buffers carry bytes, not terminal text. */
 export declare const PROTOCOL_VERSION = 1;
 export type ProviderId = 'ssh' | 'daytona' | 'skypilot' | 'modal' | 'e2b';
-export type RuntimeStatus = 'running' | 'stopped' | 'missing' | 'unknown';
+export type RuntimeStatus = 'running' | 'stopped' | 'archived' | 'missing' | 'unknown';
 export interface RuntimeSpec {
     cpu?: number;
     memoryMiB?: number;
@@ -92,6 +92,8 @@ export interface RuntimeProvider {
     readonly capabilities: Capabilities;
     ensureReady(project: ProjectRef, spec: RuntimeSpec, previous?: RuntimeRef): Promise<RuntimeRef>;
     status(runtime: RuntimeRef): Promise<RuntimeStatus>;
+    /** Resume this exact runtime and verify its workspace; never provision a replacement. */
+    restore?(project: ProjectRef, spec: RuntimeSpec, runtime: RuntimeRef): Promise<RuntimeRef>;
     exec(runtime: RuntimeRef, request: ExecRequest): Promise<ExecutionHandle>;
     files(runtime: RuntimeRef): FileTransport;
     applyIdlePolicy(runtime: RuntimeRef, policy: IdlePolicy): Promise<void>;

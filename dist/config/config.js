@@ -60,7 +60,9 @@ export function validateConfig(input) {
         invariant(PROVIDERS.includes(id) && object(options), 'CONFIG', 'Invalid provider options');
         known(options, OPTIONS[id], id);
         for (const [key, value] of Object.entries(options)) {
-            if (['port', 'sshPort', 'timeoutMs', 'cpuLimit', 'memoryLimitMiB', 'autoArchiveMinutes', 'autoDeleteMinutes'].includes(key))
+            if (key === 'autoDeleteMinutes')
+                invariant(value === -1, 'CONFIG', 'Daytona source workspaces require autoDeleteMinutes = -1 (disabled); auto-delete can destroy pending source');
+            else if (['port', 'sshPort', 'timeoutMs', 'cpuLimit', 'memoryLimitMiB', 'autoArchiveMinutes'].includes(key))
                 invariant(typeof value === 'number' && Number.isFinite(value) && value >= 0, 'CONFIG', `${id}.${key} must be a nonnegative number`);
             else if (key === 'ports')
                 invariant(Array.isArray(value) && value.every(v => Number.isInteger(v) && v > 0 && v <= 65535), 'CONFIG', `${id}.ports must contain valid port numbers`);

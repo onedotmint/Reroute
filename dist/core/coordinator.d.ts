@@ -24,6 +24,7 @@ export declare class Coordinator {
     enable(cwd: string, provider: ProviderId, override: Record<string, unknown>, fresh?: boolean): Promise<ProjectState>;
     private protectSource;
     private reconcile;
+    private validateRuntime;
     private ready;
     start(cwd: string): Promise<ProjectState>;
     run(input: RunInput, hooks?: RunHooks): Promise<ExecutionExit>;

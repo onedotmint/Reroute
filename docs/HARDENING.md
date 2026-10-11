@@ -15,6 +15,13 @@ Official evidence inspected:
 - https://www.daytona.io/docs/en/persistence.md
 - Published SDK `Daytona.d.ts`, `Sandbox.d.ts`, error declarations and `Sandbox.js`.
 
-## Remaining phases
+## Phase B — crash protection and source recovery
 
-Phase B (R-03/R-04) must implement crash-bounded native lifecycle and identity-safe restoration. Phase C (R-05/R-06/R-07) must implement local-only sync preview, explicit/reversible adapters and route explanation. Current gate: **NOT READY** until those local changes and their regression gates are complete. No live calls, paid resources, global agent settings, pushes or npm publication were performed.
+- **R-03:** Daytona retains a finite native auto-stop during active work (at least five minutes), with serialized, completion-paced one-minute `refreshActivity()` renewals. Daemon loss stops renewals; no hard TTL or auto-delete is used. Release/dispose/idle/acquire races cannot enqueue overlapping renewal work. Renewal failure reports an error, cancels active execution and invalidates coordinator warmth before retry. Native auto-delete is explicitly disabled (`-1`); GPU, Spot, VM, unknown classes and existing hard-TTL/ephemeral sandboxes fail closed. Snapshot metadata is checked before creation. Archive remains distinct from stop/delete. Signed browser preview links expire after five minutes and are generated anew by `dev open`.
+- **R-04:** Optional provider restoration resumes the original stopped/archived runtime, never creates a replacement. Core validates provider/project/ID/root/generation and shutdown guards. Daytona checks native labels and read-only remote ownership/generation/root (including symlinks). Failed resume, changed identity, unknown/missing runtime, transfer failure and conflict retain pending state and baseline; explicit destroy reconciles pending source first. Cold background recovery does not implicitly resume paid compute. A named sandbox without recorded runtime/generation now fails closed, including an interrupted create-before-state-save; recover native files/original project state deliberately rather than silently adopting it.
+
+Commands run: `npm run build && npm run verify:release`. Dist parity, both typechecks, build, **249 local tests (249 pass, 0 fail, 0 skip)**, smoke and isolated offline npm install passed. Earlier original-runtime recovery tests also passed on Node 22. These exercise fixtures/real local workers, not cloud API, disk persistence, billing or native Pi compatibility; those remain **UNVERIFIED**.
+
+## Remaining phase
+
+Phase C (R-05/R-06/R-07) must implement local-only sync preview, explicit/reversible adapters and route explanation. Current gate: **NOT READY** until those local changes and their regression gates are complete. No live calls, paid resources, global agent settings, pushes or npm publication were performed.
