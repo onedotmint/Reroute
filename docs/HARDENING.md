@@ -29,13 +29,13 @@ Commands run: `npm run build && npm run verify:release`. Dist parity, both typec
 - **R-07:** `reroute explain [--json] -- pnpm test` reuses execution's routing decision and reports matched rule, enabled project/provider, configured route, actual transparent PATH eligibility, overrides and limitations. No command/daemon/remote state mutation occurs. Absolute paths, wrappers, aliases and hidden package-script operations are not falsely claimed as intercepted.
 - Additional closure of a Phase B safety finding: warm Daytona file and execution operations now verify the remote owner/generation before each operation, not just cold restoration; a changed disk cannot be trusted because coordinator state is warm.
 
-`npm run build && npm run verify:release` passed on Node **24.21.0**, followed by the complete `verify:release` gate under Node **22**. Each run passed **289 local tests (289 pass, 0 fail, 0 cancelled, 0 skip)** plus dist parity, core/vendor typechecking, build, smoke and isolated offline tarball installation. TypeScript 5.8.3 and Python 3.14.4 were used. Node 22 emits the expected experimental MockTimers warning. GitHub CI has not been executed remotely.
+`npm run build && npm run verify:release` passed on Node **24.21.0**, followed by the complete `verify:release` gate under Node **22.23.3** (`npm exec --yes --package=node@22 -- npm run verify:release`). Each run passed **289 local tests (289 pass, 0 fail, 0 cancelled, 0 skip)** plus dist parity, core/vendor typechecking, build, smoke and isolated offline tarball installation. TypeScript 5.8.3 and Python 3.14.4 were used. Node 22 emits the expected experimental MockTimers warning. GitHub CI has not been executed remotely.
 
 ## Gate and remaining verification
 
 Local hardening R-01–R-07 is complete: **READY FOR CONTROLLED DAYTONA TEST**, not production-ready or live-certified. Follow [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md) only after explicit account-owner authorization, cost ceiling and cleanup ownership. Real Daytona API/auth, long-lived activity, retained disk across native stop/archive, browser preview, Pi compatibility and native resource/billing cleanup remain **UNVERIFIED**. Other providers and Windows/macOS are not certified by these checks.
 
-No live calls, paid resources, real global agent settings, pushes, PR/issues or npm publication were performed. Historical TAP evidence is unchanged. Local checkpoints: Phase A `2403eec`, Phase B `1cced62`; Phase C is the commit containing this section (obtain its SHA from Git).
+No live calls, paid resources, real global agent settings, pushes, PR/issues or npm publication were performed. Historical TAP evidence is unchanged. Local checkpoints: Phase A `2403eecacb20f1a2a8a5492aec862330a063b194`, Phase B `1cced625a57a81ab40a7aeb2a83c16970ddd334e`, Phase C `76aba98` (full SHA available from Git). The final documentation checkpoint records evidence after those implementation commits.
 
 ## Safety review and scope
 
@@ -52,3 +52,10 @@ legacy marker-only installations need manual review; ownership checks add Python
 SSH calls to Daytona transfers; SDK/API delays and scheduling require live budget/
 cleanup evidence; signed preview links expire and must not be shared unredacted.
 No production/cloud/native-host certification follows from the local gate.
+
+The pre-commit dist gate correctly detected a late parallel source write after an
+earlier build. No stale output was committed: after all agents finished, dist was
+regenerated and the **complete Node 24 and Node 22 release gates were rerun**, each
+289/289 with no skips. AFT inspection had partial/interrupted diagnostic snapshots;
+it was not treated as a clean compiler result. The pinned compiler and real-vendor
+typecheck commands above are the authoritative passing gates.

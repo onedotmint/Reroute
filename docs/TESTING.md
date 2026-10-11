@@ -71,7 +71,9 @@ live in [HARDENING.md](HARDENING.md); the controlled native trial checklist is
 smoke; a temporary rebuild matched the existing `dist/`. These results come from the
 session output, with no new archived TAP or commit association. Earlier passing TAP
 records remain historical and do not verify the new changes. Live providers, native
-harnesses and current package installation were not tested in this follow-up.
+harnesses and package installation were not tested in that historical follow-up.
+The later hardening gates do verify isolated offline installation; native/cloud
+compatibility remains unverified.
 
 ## Live providers: opt-in and potentially billable
 
