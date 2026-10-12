@@ -17,7 +17,7 @@ try {
  const installed=join(clean,'node_modules','reroute','bin','reroute.mjs');
  run(process.execPath,[resolve('tests/smoke.mjs'),installed]);
  const pkg=JSON.parse(await readFile(join(clean,'node_modules','reroute','package.json'),'utf8'));
- assert.equal(pkg.version,'0.3.0-native.2');
+ assert.equal(pkg.version,'0.3.0-native.3');
  const commit=process.env.GITHUB_SHA??run('git',['rev-parse','HEAD']).trim();
  await writeFile(join(output,'COMMIT.txt'),commit+'\n');
  await writeFile(join(output,'package-verification.json'),JSON.stringify({commit,version:pkg.version,tarball:pack.filename,integrity:pack.integrity,shasum:pack.shasum,packageBytes:pack.size,unpackedBytes:pack.unpackedSize,cleanInstall:true,smoke:true,node:process.version},null,2)+'\n');

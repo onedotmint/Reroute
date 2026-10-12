@@ -4,18 +4,18 @@
 
 Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands stay local. Failed remote jobs never silently retry locally.
 
-**Status:** 0.3.0-native.2 candidate. SSH is tested through real OpenSSH and rsync on an isolated Ubuntu localhost server in CI. Other cloud providers are implemented and contract-tested, but their real account integrations are **LIVE UNVERIFIED**.
+**Status:** 0.3.0-native.3 candidate. SSH is tested through real OpenSSH and rsync on an isolated Ubuntu localhost server in CI. Other cloud providers are implemented and contract-tested, but their real account integrations are **LIVE UNVERIFIED**.
 
 ## Install on Windows 11 + WSL2
 
 Requirements: run inside **WSL2** with Node.js >=22.19, Git, Bash, Pi, and an already configured Linux compute resource.
 
 1. Open [GitHub Actions: Verify native Reroute](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml). Choose a **successful** run on branch `rebuild/0.3-native`.
-2. Download its `reroute-npm-node-22-<sha>` (or Node 24) artifact; unzip and locate `reroute-0.3.0-native.2.tgz`. The artifact also includes a commit SHA and test evidence.
+2. Download its `reroute-npm-node-22-<sha>` (or Node 24) artifact; unzip and locate `reroute-0.3.0-native.3.tgz`. The artifact also includes a commit SHA and test evidence.
 3. From a WSL shell run:
 
 ~~~bash
-npm install -g ./reroute-0.3.0-native.2.tgz
+npm install -g ./reroute-0.3.0-native.3.tgz
 cd /path/to/your/project
 reroute setup
 reroute doctor
@@ -25,6 +25,21 @@ reroute doctor --connect
 `reroute setup` saves the project's `.reroute.json` and writes one owned Pi extension entry into `~/.pi/agent/extensions/reroute.ts` (or `$PI_CODING_AGENT_DIR/extensions/reroute.ts`). Existing unowned extensions are **not overwritten**. Run `/reload` if Pi is already open, then `/reroute`. This is a native TUI menu; viewing the panel does not use a model or create billable resources.
 
 Alternatively, build from the GitHub branch with `npm ci && npm run build && npm pack`.
+
+## Friendly setup and Pi control panel
+
+Run `reroute setup` in any project. The Clack wizard guides you through five choices (SSH, Daytona, SkyPilot, Modal, E2B), detects native/environment credentials, and optionally prompts for masked cloud API keys. It then offers a **read-only** list of existing hosts, clusters or Sandboxes; choose an existing item or type its ID yourself. The final optional connection check is explicit and never provisions/resumes compute.
+
+Cloud credentials are read from each provider's native environment/configuration first. For users who explicitly choose **Save locally**, Reroute stores keys outside the project in `~/.config/reroute/credentials.json` (or `$XDG_CONFIG_HOME/reroute/credentials.json`), with a private 0700 folder and 0600 file. This is **not an encrypted keychain**; use environment variables/native CLI authentication instead if preferable. API keys never appear in `.reroute.json`, the wizard's review, or Pi panel labels. Reroute passes saved credentials directly to official SDKs without adding them to global environment variables.
+
+~~~bash
+reroute credentials                                  # sources only; never prints keys
+reroute credentials forget --provider daytona --yes   # forget saved Daytona key only
+~~~
+
+Run `reroute setup` again to add or edit another named profile. Project profiles are shared by CLI and Pi; existing profiles are preserved. Credential/resource checks are not evidence that a paid cloud account was live-tested in CI.
+
+In Pi, `/reroute` immediately shows the **active profile, provider, resource ID, routing mode, credential source and configured profiles**. Choose **Overview** for all local profiles and recent task counts. **Manage providers** can add/edit/switch/forget local profiles and explicitly discover existing resources; **Credentials** shows safe status, explains masked CLI onboarding, or forgets a locally stored key. **Check connection** is opt-in; opening the panel does not contact remote APIs, resume compute, or use a model. Resource lifecycle actions continue to require explicit confirmation and can incur charges.
 
 ## Provider prerequisites
 
@@ -55,7 +70,7 @@ reroute status JOB_ID
 reroute cancel JOB_ID
 ~~~
 
-Pi's ordinary Bash runs through the same router after installation. The `/reroute` menu offers profile switching, connection checks, routing mode, recent jobs, and explicit resource operations. The CLI and Pi share the project config. A confirmed timeout returns 124, a confirmed cancellation returns 130, and infrastructure/unknown/incomplete output returns 125. A remote failure is **never** retried locally without your action.
+Pi's ordinary Bash runs through the same router after installation. The `/reroute` menu shows all saved profiles, credential sources, routing mode, recent jobs and on-demand connection/resource controls. The CLI and Pi share the project config. A confirmed timeout returns 124, a confirmed cancellation returns 130, and infrastructure/unknown/incomplete output returns 125. A remote failure is **never** retried locally without your action.
 
 Automatic classification fails closed: unrecognized scripts, redirects, pipes, expansions, working-directory changes, watch servers, deployment/publishing and other side-effect commands stay local. To override explicitly use `reroute exec`. Use `reroute --help` for setup flags, diagnostics and resource management.
 

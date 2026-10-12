@@ -47,7 +47,7 @@ export async function main(argv=process.argv.slice(2)): Promise<void> {
       'non-interactive':{type:'boolean'},provider:{type:'string'},id:{type:'string'},name:{type:'string'},root:{type:'string'},port:{type:'string'},identity:{type:'string'},app:{type:'string'},tasks:{type:'string'},'no-pi':{type:'boolean'},'ignore-legacy':{type:'boolean'},to:{type:'string'},
     }});
     const command=a[0], cwd=resolve(v.cwd??process.cwd());
-    if(v.version){console.log('0.3.0-native.2');return;}
+    if(v.version){console.log('0.3.0-native.3');return;}
     if(v.help||!command){console.log(HELP);return;}
     if(command==='setup'){const config=await setup(cwd,{nonInteractive:v['non-interactive'],provider:v.provider,id:v.id,name:v.name,root:v.root,port:v.port,identity:v.identity,app:v.app,tasks:v.tasks,noPi:v['no-pi'],ignoreLegacy:v['ignore-legacy']});if(v['non-interactive'])output({saved:true,active:config.active,pi:!v['no-pi']});return;}
     if(command==='pi'&&a[1]==='install'){output({entry:await installPi()});return;}

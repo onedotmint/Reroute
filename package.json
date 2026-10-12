@@ -1,6 +1,6 @@
 {
   "name": "reroute",
-  "version": "0.3.0-native.2",
+  "version": "0.3.0-native.3",
   "description": "Keep Pi and source local; offload build, test and compute through native remote tools",
   "type": "module",
   "license": "Apache-2.0",
