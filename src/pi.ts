@@ -1,6 +1,7 @@
 import type { BashOperations, ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { activeProfile, loadConfig, saveConfig, listJobs, validate } from './config.js';
 import { credentialStatus } from './auth.js';
+import { discoverExisting } from './discovery.js';
 import { PROVIDERS, type Config, type Profile, type ProviderId, type Job } from './types.js';
 import { runRemote, resourceAction } from './engine.js';
 import { ruleRouter } from './router.js';
@@ -42,33 +43,31 @@ async function editFromPi(ctx: ExtensionCommandContext, root: string, config: Co
   if (!name) return false;
   if (!/^[a-zA-Z0-9._-]+$/.test(name)) throw new Error('Profile name: letters, digits, dot, dash or underscore only');
   const old = config.profiles[name];
-  const choice = await ctx.ui.select('Compute provider for ' + name + (old ? ' (currently ' + old.provider + ')' : ''), [...PROVIDERS]);
+  const keep = old ? 'Keep current (' + old.provider + ')' : undefined;
+  const choice = await ctx.ui.select('Compute provider for ' + name, [...(keep ? [keep] : []), ...PROVIDERS]);
   if (!choice) return false;
-  const picked = choice as ProviderId;
+  const picked = (choice === keep ? old!.provider : choice) as ProviderId;
   const profile: Partial<Profile> = old?.provider === picked ? {...old} : {provider:picked};
   profile.provider = picked;
   const resource = await ctx.ui.input('Existing resource ID' + (profile.id ? ' (current: ' + profile.id + '; blank keeps it)' : ''),
     picked === 'ssh' ? 'SSH alias or user@host' : picked === 'skypilot' ? 'SkyPilot cluster / SSH alias' : 'Existing sandbox ID');
-  if (resource === undefined) return false;
-  if (resource.trim()) profile.id = resource.trim();
+  if (resource === undefined && !profile.id) return false;
+  if (resource?.trim()) profile.id = resource.trim();
   if (!profile.id) throw new Error('Resource ID is required. This action does not create remote resources.');
   if (picked === 'modal') {
     const app = await ctx.ui.input('Existing Modal app name (current: ' + (profile.app ?? 'none') + '; blank keeps it)', 'Existing app name');
-    if (app === undefined) return false;
-    if (app.trim()) profile.app = app.trim();
+    if (app === undefined && !profile.app) return false;
+    if (app?.trim()) profile.app = app.trim();
     if (!profile.app) throw new Error('Modal requires an existing app name for snapshot resume.');
   }
   if (picked === 'ssh' || picked === 'skypilot') {
     const identity = await ctx.ui.input('SSH private key path (current: ' + (profile.identityFile ?? 'ssh-agent') + '; blank keeps it)', 'Absolute path, optional');
-    if (identity === undefined) return false;
-    if (identity.trim()) profile.identityFile = identity.trim();
+    if (identity?.trim()) profile.identityFile = identity.trim();
     const port = await ctx.ui.input('SSH port (current: ' + (profile.port ?? 'SSH config') + '; blank keeps it)', '1-65535, optional');
-    if (port === undefined) return false;
-    if (port.trim()) profile.port = Number(port);
+    if (port?.trim()) profile.port = Number(port);
   }
   const location = await ctx.ui.input('Remote root (current: ' + (profile.root ?? '/tmp/reroute-v3') + '; blank keeps it)', 'Absolute isolated path');
-  if (location === undefined) return false;
-  profile.root = location.trim() || profile.root || '/tmp/reroute-v3';
+  profile.root = location?.trim() || profile.root || '/tmp/reroute-v3';
   const next: Config = { ...config, profiles: {...config.profiles, [name]: profile as Profile}, active: name };
   validate(next);
   if (!await ctx.ui.confirm('Save local profile?', name + ' | ' + picked + ' | ' + profile.id +
@@ -80,11 +79,33 @@ async function editFromPi(ctx: ExtensionCommandContext, root: string, config: Co
 async function manageProviders(ctx: ExtensionCommandContext, root: string, config: Config): Promise<boolean> {
   for (;;) {
     const selected = await ctx.ui.select('Configured profiles (' + Object.keys(config.profiles).length + ')', [
-      'Add provider', 'Edit provider', 'Switch active provider', 'Remove local profile', 'Back',
+      'Add provider', 'Edit provider', 'Discover existing resources', 'Switch active provider', 'Remove local profile', 'Credentials help', 'Back',
     ]);
     if (!selected || selected === 'Back') return false;
     if (selected === 'Add provider') return editFromPi(ctx, root, config);
-    if (selected === 'Edit provider') {
+    if (selected === 'Credentials help') {
+      ctx.ui.notify('Use reroute setup in your terminal to enter masked keys, store them in a private 0600 file, or use native provider login. Pi input is not masked: never paste API keys here.', 'info');
+    } else if (selected === 'Discover existing resources') {
+      const name = await ctx.ui.select('Discover resources for which profile?', Object.keys(config.profiles));
+      if (!name) continue;
+      const profile = config.profiles[name]!;
+      if (!await ctx.ui.confirm('List existing '+profile.provider+' resources?', 'Read-only listing may contact its control plane. No compute will be provisioned or resumed.')) continue;
+      let resources: Awaited<ReturnType<typeof discoverExisting>>;
+      try { resources = await discoverExisting(profile.provider); }
+      catch { ctx.ui.notify('Resource listing failed. Check credentials with reroute setup; you can still enter an ID manually.', 'error'); continue; }
+      if (!resources.length) { ctx.ui.notify('No listed resources. Use Add / Edit provider to enter an existing ID manually.', 'info'); continue; }
+      const labels = resources.map(r => r.id + ' (' + r.state + ')');
+      const choice = await ctx.ui.select('Select existing '+profile.provider+' resource', labels);
+      if (!choice) continue;
+      const chosen = resources[labels.indexOf(choice)];
+      if (!chosen || chosen.id === profile.id) continue;
+      if (await ctx.ui.confirm('Use '+chosen.id+' for '+name+'?', 'Only the local profile ID changes. The remote resource remains untouched.')) {
+        profile.id = chosen.id;
+        await saveConfig(root, config);
+        ctx.ui.notify('Selected existing resource '+chosen.id, 'info');
+        return true;
+      }
+    } else if (selected === 'Edit provider') {
       const name = await ctx.ui.select('Edit which profile?', Object.keys(config.profiles));
       if (name) return editFromPi(ctx, root, config, name);
     } else if (selected === 'Switch active provider') {
