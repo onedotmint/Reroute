@@ -46,3 +46,15 @@ jobs:
         run: npm run smoke
       - name: Tarball and clean offline prefix installation
         run: npm run check:package
+      - name: Pack the verified commit
+        run: |
+          mkdir -p .artifacts
+          npm pack --pack-destination .artifacts
+          printf '%s\n' "$GITHUB_SHA" > .artifacts/COMMIT.txt
+      - name: Upload installable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: reroute-npm-node-${{ matrix.node }}-${{ github.sha }}
+          path: .artifacts/
+          if-no-files-found: error
+          retention-days: 30
