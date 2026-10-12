@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream';
+import { feedInput } from '../util.js';
 import type { Profile, Provider, ExecOptions, ExecResult } from '../types.js';
 export class ModalProvider implements Provider {
   readonly stdin = true;
@@ -19,9 +19,11 @@ export class ModalProvider implements Provider {
       try { for (;;) { options.signal?.throwIfAborted(); const {done,value} = await reader.read(); if (done) break; const b = Buffer.from(value!); if (target === 'stdout') stdout = (stdout + b.toString()).slice(-1024 * 1024); else stderr = (stderr + b.toString()).slice(-1024 * 1024); options[target]?.(b); } }
       finally { reader.releaseLock(); }
     };
-    const input = options.stdin ? Readable.toWeb(options.stdin as Readable).pipeTo(proc.stdin) : proc.stdin.close();
-    const [code] = await Promise.all([proc.wait(), drain(proc.stdout, 'stdout'), drain(proc.stderr, 'stderr'), input]);
-    return { code, stdout, stderr };
+    const writer = proc.stdin.getWriter();
+    const input = options.stdin ? feedInput(options.stdin, chunk => writer.write(chunk), () => writer.close()) : undefined;
+    const eof = input ? input.done.then(() => new Promise<never>(()=>{})) : writer.close().then(() => new Promise<never>(()=>{}));
+    try { const [code] = await Promise.all([Promise.race([proc.wait(), eof]), drain(proc.stdout, 'stdout'), drain(proc.stderr, 'stderr')]); return { code, stdout, stderr }; }
+    finally { input?.stop(); writer.releaseLock(); }
   }
   async put(local: string, remote: string): Promise<void> { await (await this.lookup()).filesystem.copyFromLocal(local, remote); }
   async get(remote: string, local: string): Promise<void> { await (await this.lookup()).filesystem.copyToLocal(remote, local); }

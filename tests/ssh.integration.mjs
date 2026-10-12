@@ -1,0 +1,87 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, rm, access } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { spawnSync } from 'node:child_process';
+import * as sdk from '@earendil-works/pi-coding-agent';
+import { defaults, saveConfig, getJob } from '../dist/config.js';
+import { runRemote, downloadArtifact, inspectJob, helperCommand } from '../dist/engine.js';
+import { SshProvider } from '../dist/providers/ssh.js';
+import { createRerouteOperations } from '../dist/pi.js';
+import { shell, requireSuccess } from '../dist/util.js';
+const env=process.env;
+if(!env.REROUTE_TEST_SSH_ID||!env.REROUTE_TEST_SSH_PORT||!env.REROUTE_TEST_SSH_KEY)throw Error('Real SSH test requires the isolated CI server, or explicit REROUTE_TEST_SSH_* variables. Not a mocked pass.');
+const evidence={kind:'real OpenSSH/rsync over localhost; NOT cross-machine/WSL acceptance',node:process.version,checks:[],measurements:{}};
+const mark=name=>evidence.checks.push(name);
+const base=await mkdtemp(join(tmpdir(),'reroute-ssh-client-')), root=join(base,'project');await mkdir(root);
+process.env.REROUTE_STATE_DIR=join(base,'receipts');
+const remoteRoot='/tmp/reroute-ssh-acceptance-'+randomUUID();
+const profile={provider:'ssh',id:env.REROUTE_TEST_SSH_ID,port:Number(env.REROUTE_TEST_SSH_PORT),identityFile:env.REROUTE_TEST_SSH_KEY,root:remoteRoot};
+const config={...defaults(),active:'ssh-test',profiles:{'ssh-test':profile}};const provider=new SshProvider(profile);
+const run=(command,extra={})=>runRemote(command,{cwd:root,root,config,...extra});
+const git=(...args)=>{const r=spawnSync('git',['-C',root,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);};
+let first,second;
+await test('real SSH: dirty/current inputs, channel separation, native exit codes, no source writeback', {timeout:120000},async()=>{
+  git('init','-q');git('config','user.name','Reroute test');git('config','user.email','test@example.invalid');
+  await writeFile(join(root,'tracked.txt'),'committed\n');await writeFile(join(root,'deleted.txt'),'old');git('add','.');git('commit','-qm','fixture');
+  await writeFile(join(root,'tracked.txt'),'dirty\n');await rm(join(root,'deleted.txt'));await writeFile(join(root,'new.txt'),'new\n');
+  await writeFile(join(root,'payload.dat'),randomBytes(1024*1024));await writeFile(join(root,'.env'),'MUST_NOT_BE_SENT=private');
+  await saveConfig(root,config);
+  first=await run('test -n "$SSH_CONNECTION" || exit 66; test ! -e .git && test ! -e .env && test ! -e deleted.txt || exit 67; cat tracked.txt new.txt; echo remote > tracked.txt; echo cache > "$CARGO_TARGET_DIR/proof"; echo artifact > "$REROUTE_ARTIFACTS/proof.txt"; echo diagnostic >&2; exit 7');
+  assert.equal(first.code,7);assert.equal(first.stdout,'dirty\nnew\n');assert.equal(first.stderr,'diagnostic\n');assert.equal(first.job.status,'exited');
+  assert.equal(await readFile(join(root,'tracked.txt'),'utf8'),'dirty\n');mark('dirty/new/deleted input; no .git or .env; SSH_CONNECTION; stdout/stderr/exit7; no writeback');
+});
+await test('real SSH: incremental transfer, deleted input, native cache reuse, immutable artifacts', {timeout:120000},async()=>{
+  assert.ok(first);await rm(join(root,'new.txt'));
+  second=await run('test ! -e new.txt; cat tracked.txt "$CARGO_TARGET_DIR/proof"');assert.equal(second.code,0);assert.equal(second.stdout,'dirty\ncache\n');
+  assert.equal(first.job.metrics.cacheKey,second.job.metrics.cacheKey);assert.ok(second.job.metrics.transferredBytes<first.job.metrics.transferredBytes/4,JSON.stringify([first.job.metrics,second.job.metrics]));
+  const archive=join(base,'proof.tgz');await downloadArtifact(first.job.id,'@outputs/proof.txt',archive);
+  const tar=spawnSync('tar',['-xOzf',archive,'proof.txt'],{encoding:'utf8'});assert.equal(tar.status,0,tar.stderr);assert.equal(tar.stdout,'artifact\n');
+  await assert.rejects(downloadArtifact(first.job.id,'@outputs/proof.txt',archive),/exist/i);
+  await assert.rejects(downloadArtifact(first.job.id,'../escape',join(base,'bad.tgz')),/Unsafe/);
+  evidence.measurements.inputCold=first.job.metrics;evidence.measurements.inputWarm=second.job.metrics;mark('rsync incremental byte savings; deletions; cache reuse; explicit checked archive; no overwrite');
+});
+await test('real SSH: stdin EOF, confirmed timeout and cancellation, cache-lock serialization', {timeout:120000},async()=>{
+  const input=await run('cat',{stdin:Readable.from(['stdin\n'])});assert.equal(input.stdout,'stdin\n');assert.equal(input.code,0);
+  const timed=await run('sleep 20',{timeoutMs:250});assert.equal(timed.code,124);assert.equal(timed.job.status,'timed_out');
+  const controller=new AbortController();let collision;
+  const cancelled=await run('echo ready; sleep 20',{signal:controller.signal,stdout:b=>{if(b.toString().includes('ready')){collision=run('echo SHOULD_NOT_RUN').then(()=>{throw Error('Concurrent task should be rejected')},e=>assert.match(String(e),/BUSY/)).finally(()=>controller.abort());}}});
+  await collision;assert.equal(cancelled.code,130);assert.equal(cancelled.job.status,'cancelled');
+  mark('stdin/EOF; timeout124; cancellation130 receipt; concurrent task refused');
+});
+await test('real SSH: symlink artifact and corrupt transfer fail closed, no uncertain success', {timeout:120000},async()=>{
+  const linked=await run('ln -s /etc/passwd leak; echo original > safe.txt');assert.equal(linked.code,0);
+  await assert.rejects(downloadArtifact(linked.job.id,'leak',join(base,'leak.tgz')),/Symlink/);
+  const corrupted=new SshProvider(profile);const put=corrupted.put.bind(corrupted);
+  corrupted.put=async(local,remote)=>{await put(local,remote);if(remote.endsWith('/request.json'))await requireSuccess(corrupted.exec(shell(['python3','-c','import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["files"][0]["sha256"]="0"*64; json.dump(d,open(p,"w"))',remote])));};
+  let job;await assert.rejects(run('touch MUST_NOT_EXECUTE',{provider:corrupted,onJob:j=>job=j}),/checksum mismatch/);
+  const inspected=await inspectJob(job.id);assert.equal(inspected.status,'failed');
+  const check=await provider.exec('test ! -e '+shell([job.root+'/work/MUST_NOT_EXECUTE']));assert.equal(check.code,0);
+  mark('actual SSH file transfer fault injection; verifier rejects before execution; symlink artifact refused');
+});
+await test('real SSH: Pi native Bash calls the remote operations and keeps native result protocol', {timeout:120000},async()=>{
+  config.remote=[['printenv','SSH_CONNECTION']];await saveConfig(root,config);
+  const tool=sdk.createBashTool(root,{operations:createRerouteOperations(sdk.createLocalBashOperations())});
+  const r=await tool.execute('ssh-pi-test',{command:"printenv SSH_CONNECTION"},undefined,()=>{});
+  assert.match(r.content.map(x=>x.text??'').join('\n'),/127\.0\.0\.1/);assert.equal(r.structuredContent.exit_code,0);mark('actual Pi native Bash -> Reroute -> actual SSH process');
+});
+await test('real SSH: native lockfile bootstrap and Cargo compiler cache measurements', {timeout:180000},async()=>{
+  await writeFile(join(root,'package.json'),JSON.stringify({name:'reroute-fixture',version:'1.0.0',scripts:{build:'node -e "console.log(42)"'}}));
+  await writeFile(join(root,'package-lock.json'),JSON.stringify({name:'reroute-fixture',version:'1.0.0',lockfileVersion:3,requires:true,packages:{'':{name:'reroute-fixture',version:'1.0.0'}}}));
+  const node=await run('npm run build');assert.equal(node.code,0,node.stderr);assert.match(node.stdout,/42/);await assert.rejects(access(join(root,'node_modules')));mark('native npm ci bootstrap; local dependency tree unchanged');
+  const available=await provider.exec('command -v cargo && command -v rustc');assert.equal(available.code,0,'CI Rust prerequisite unavailable: '+available.stderr);
+  await mkdir(join(root,'src'));await writeFile(join(root,'Cargo.toml'),'[package]\nname = "reroute_cache_fixture"\nversion = "0.1.0"\nedition = "2021"\n');
+  await writeFile(join(root,'Cargo.lock'),'version = 3\n[[package]]\nname = "reroute_cache_fixture"\nversion = "0.1.0"\n');
+  await writeFile(join(root,'src','lib.rs'),'pub fn sum(a:u64,b:u64)->u64{a+b}\n#[test] fn works(){assert_eq!(sum(2,3),5);}\n');
+  const start=performance.now(),cold=await run('cargo test --offline -v'),coldMs=performance.now()-start;
+  assert.equal(cold.code,0,cold.stderr);assert.match(cold.stderr,/Compiling reroute_cache_fixture/);
+  const warmStart=performance.now(),warm=await run('cargo test --offline -v'),warmMs=performance.now()-warmStart;
+  assert.equal(warm.code,0,warm.stderr);assert.match(warm.stderr,/Fresh reroute_cache_fixture/);assert.doesNotMatch(warm.stderr,/Compiling reroute_cache_fixture/);
+  evidence.measurements.cargo={coldEndToEndMs:coldMs,warmEndToEndMs:warmMs,coldCompiled:true,warmFresh:true,scope:'same-host SSH; not a cross-machine speedup claim'};mark('actual Cargo cold compilation and warm Fresh cache');
+});
+// Cleanup is limited to this uniquely named fixture, never a user resource.
+await provider.exec(shell(['rm','-rf','--',remoteRoot]));await rm(base,{recursive:true,force:true});
+await mkdir('.artifacts',{recursive:true});await writeFile('.artifacts/ssh-verification.json',JSON.stringify(evidence,null,2)+'\n');

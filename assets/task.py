@@ -8,12 +8,14 @@ import os
 import pathlib
 import re
 import shutil
+import shlex
 import signal
 import stat
 import subprocess
 import sys
 import tarfile
 import time
+import uuid
 
 
 def read(path):
@@ -140,6 +142,8 @@ def main(action, data):
     job = clean_path(root / 'jobs' / identity)
     lock = root / 'lock'
     receipt = job / 'receipt.json'
+    work = clean_path(root / 'work')
+    work_owner = clean_path(root / 'work-owner')
 
     def unlock():
         if lock.is_dir() and (lock / 'owner').read_text() == identity:
@@ -147,6 +151,14 @@ def main(action, data):
 
     def finish(status, code):
         result = {'status': status, 'code': code, 'scope': 'process-group', 'finishedAt': time.time()}
+        if status != 'unknown' and work.exists():
+            if not work_owner.is_file() or work_owner.read_text() != identity:
+                status, code = 'unknown', 125
+                result.update(status=status, code=code, error='Execution directory ownership is unconfirmed; retained without changes')
+            else:
+                # Archive only this task after process-group termination is confirmed.
+                clean_path(work).rename(job / 'work')
+                work_owner.unlink()
         write(receipt, result)
         if status != 'unknown':
             unlock()
@@ -191,8 +203,8 @@ def main(action, data):
             entries(source)
         elif not source.is_file():
             raise ValueError('Artifact is not a regular file/directory')
-        output = job / ('artifact-' + str(os.getpid()) + '.tgz')
-        with tarfile.open(output, 'w:gz', dereference=False) as tf:
+        output = job / ('artifact-' + str(uuid.uuid4()) + '.tgz')
+        with open(output, 'xb') as archive, tarfile.open(fileobj=archive, mode='w:gz', dereference=False) as tf:
             tf.add(source, arcname=source.name, recursive=True)
         if output.stat().st_size > 256 * 1024 * 1024:
             output.unlink()
@@ -235,7 +247,13 @@ def main(action, data):
         try:
             verify(seed, manifest)
             write(root / 'baseline.json', manifest)
-            shutil.copytree(seed, job / 'work')
+            if work.exists():
+                raise ValueError('Unresolved execution directory retained; refusing to overwrite it')
+            if work_owner.exists():
+                raise ValueError('Stale execution ownership marker retained')
+            with open(work_owner, 'x') as f:
+                f.write(identity)
+            shutil.copytree(seed, work)
             (job / 'outputs').mkdir(mode=0o700)
             (job / 'sealed').touch()
             return {'sealed': True}
@@ -248,22 +266,35 @@ def main(action, data):
         raise ValueError('Task already started or input not sealed')
     if (job / 'cancel').exists():
         return finish('cancelled', 130)
-    verify(job / 'work', manifest)
+    if not work_owner.is_file() or work_owner.read_text() != identity:
+        raise ValueError('Task does not own the execution directory')
+    verify(work, manifest)
     key = request['cacheKey']
     if not re.fullmatch('[a-f0-9]{64}', key):
         raise ValueError('Invalid cache key')
     cache = clean_path(root / 'cache' / key)
-    for directory in ['node_modules','npm','pnpm','cargo','cargo-target','xdg','pycache']:
+    for directory in ['npm','pnpm','cargo','cargo-target','xdg','pycache','bun']:
         clean_path(cache / directory).mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.symlink(cache / 'node_modules', job / 'work' / 'node_modules', target_is_directory=True)
     cwd = request['cwd']
-    workdir = job / 'work' if cwd == '.' else clean_path(job / 'work' / safe(cwd))
+    workdir = work if cwd == '.' else clean_path(work / safe(cwd))
     env = dict(os.environ)
-    env.update({'CARGO_HOME': str(cache / 'cargo'), 'CARGO_TARGET_DIR': str(cache / 'cargo-target'), 'npm_config_cache': str(cache / 'npm'), 'npm_config_store_dir': str(cache / 'pnpm'), 'XDG_CACHE_HOME': str(cache / 'xdg'), 'PYTHONPYCACHEPREFIX': str(cache / 'pycache'), 'REROUTE_ARTIFACTS': str(job / 'outputs'), 'REROUTE_JOB_ID': identity})
+    env.update({'CARGO_HOME': str(cache / 'cargo'), 'CARGO_TARGET_DIR': str(cache / 'cargo-target'), 'npm_config_cache': str(cache / 'npm'), 'npm_config_store_dir': str(cache / 'pnpm'), 'XDG_CACHE_HOME': str(cache / 'xdg'), 'PYTHONPYCACHEPREFIX': str(cache / 'pycache'), 'REROUTE_ARTIFACTS': str(job / 'outputs'), 'REROUTE_JOB_ID': identity, 'BUN_INSTALL_CACHE_DIR': str(cache / 'bun'), 'PATH': str(workdir / 'node_modules' / '.bin') + os.pathsep + str(work / 'node_modules' / '.bin') + os.pathsep + env.get('PATH', '')})
     timeout = float(request['timeoutSeconds'])
     if not 0 < timeout <= 86400:
         raise ValueError('Invalid task timeout')
-    child = subprocess.Popen(['bash', '-lc', request['command']], cwd=workdir, env=env, start_new_session=True)
+    command = request['command']
+    prepare = request.get('prepare')
+    if prepare:
+        directory = prepare['cwd']
+        directory = work if directory == '.' else clean_path(work / safe(directory))
+        argv = prepare['argv']
+        if argv[0] not in ('npm', 'pnpm', 'yarn', 'bun'):
+            raise ValueError('Unsupported dependency preparation')
+        if argv[0] == 'pnpm':
+            argv += ['--store-dir', str(cache / 'pnpm')]
+        # Per-task dependency directories avoid stale workspace symlinks; downloads are cached.
+        command = '(cd ' + shlex.quote(str(directory)) + ' && ' + shlex.join(argv) + ') && ' + command
+    child = subprocess.Popen(['bash', '-c', command], cwd=workdir, env=env, start_new_session=True)
     write(job / 'process.json', {'supervisor': os.getpid(), 'start': proc(os.getpid())['start'], 'child': child.pid})
     until = time.monotonic() + timeout
     interrupted = [False]

@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { readFile, writeFile, mkdtemp, rm, mkdir, link, realpath } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -6,6 +7,7 @@ import type { Config, ExecOptions, ExecResult, Job, JobStatus, Profile, Provider
 import { activeProfile, getJob, listJobs, loadConfig, saveConfig, saveJob } from './config.js';
 import { hash, inside, noSymlink, requireSuccess, safeRelative, shell } from './util.js';
 import { snapshot } from './snapshot.js';
+import { nodePreparation } from './prepare.js';
 import { createProvider } from './providers/index.js';
 export { ruleRouter } from './router.js';
 export { loadConfig } from './config.js';
@@ -19,6 +21,7 @@ export async function helperCommand(action: string, data: Record<string, unknown
 type Receipt = { status: JobStatus; code?: number; error?: string };
 async function control<T>(provider: Provider, action: string, job: Pick<Job, 'root' | 'id'>, extra: Record<string,unknown> = {}): Promise<T> {
   const r = await requireSuccess(provider.exec(await helperCommand(action, { root: job.root, id: job.id, ...extra }), { timeoutMs: action === 'cancel' ? 15000 : 120000 }));
+  if (r.stdoutTruncated) throw new Error(`Truncated remote ${action} response; state not confirmed`);
   try { return JSON.parse(r.stdout) as T; } catch { throw new Error(`Invalid or truncated remote ${action} response; state not confirmed`); }
 }
 export interface RunOptions extends ExecOptions {
@@ -55,7 +58,7 @@ export async function runRemote(command: string, options: RunOptions): Promise<R
     await control(provider, 'acquire', job); owned = true; inFlight = false;
     const cacheKey = hash(input.cacheKey + '\0' + profile.provider);
     const requestFile = join(controlDir, 'request.json');
-    await writeFile(requestFile, JSON.stringify({ files: input.files, command, cwd: job.cwd, timeoutSeconds, cacheKey }), { mode: 0o600 });
+    await writeFile(requestFile, JSON.stringify({ files: input.files, command, cwd: job.cwd, timeoutSeconds, cacheKey, prepare: await nodePreparation(input.dir,job.cwd,command) }), { mode: 0o600 });
     const transferStart = performance.now();
     inFlight = true;
     await provider.put(requestFile, `${job.root}/jobs/${job.id}/request.json`);
@@ -118,7 +121,11 @@ export async function runRemote(command: string, options: RunOptions): Promise<R
     if (owned && !inFlight && !started) {
       try { Object.assign(job, await control<Receipt>(provider, 'abort-prepare', job)); } catch { job.status = 'unknown'; }
     } else job.status = inFlight || started ? 'unknown' : 'failed';
-    if (owned && inFlight) job.error += '. Input acknowledgement is uncertain; the remote lock is retained. Inspect the provider before manual recovery.';
+    if (!owned && /BUSY:/.test(String(error))) job.status = 'failed';
+    if (owned && inFlight) {
+      try { const receipt = await control<Receipt>(provider, 'status', job); if (terminal(receipt.status)) Object.assign(job, receipt); } catch {}
+    }
+    if (owned && inFlight && job.status === 'unknown') job.error += '. Input acknowledgement is uncertain; the remote lock is retained. Inspect the provider before manual recovery.';
     await saveJob(job);
     throw new Error(`${job.error} [job ${job.id}; ${job.status}; never retried locally]`, { cause: error });
   } finally { await input.cleanup(); await rm(controlDir, { recursive: true, force: true }); await provider.close?.(); }
@@ -141,10 +148,11 @@ export async function downloadArtifact(id: string, path: string, destination: st
   try {
     if (await provider.status() !== 'running') throw new Error('Resource is not running; downloading never resumes paid compute');
     const info = await control<{path: string; bytes: number; sha256: string}>(provider, 'artifact', job, {path});
-    if (!info.path.startsWith(`${job.root}/jobs/${id}/artifact-`) || !/^[a-f0-9]{64}$/.test(info.sha256) || info.bytes > 256 * 1024 * 1024) throw new Error('Invalid artifact receipt');
+    if (!info.path.startsWith(`${job.root}/jobs/${id}/artifact-`) || !/^artifact-[a-f0-9-]+\.tgz$/.test(info.path.slice(info.path.lastIndexOf('/')+1)) || !/^[a-f0-9]{64}$/.test(info.sha256) || !Number.isSafeInteger(info.bytes) || info.bytes < 0 || info.bytes > 256 * 1024 * 1024) throw new Error('Invalid artifact receipt');
     await provider.get(info.path, archive);
-    const bytes = await readFile(archive);
-    if (bytes.length !== info.bytes || hash(bytes) !== info.sha256) throw new Error('Incomplete artifact download');
+    const digest = createHash('sha256'); let bytes = 0;
+    for await (const chunk of createReadStream(archive)) { bytes += chunk.length; digest.update(chunk); if (bytes > info.bytes) throw new Error('Oversized artifact download'); }
+    if (bytes !== info.bytes || digest.digest('hex') !== info.sha256) throw new Error('Incomplete artifact download');
     await noSymlink(dest); await link(archive, dest);
     return dest;
   } finally { await rm(temp, { recursive: true, force: true }); await provider.close?.(); }

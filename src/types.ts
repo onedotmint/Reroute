@@ -31,7 +31,7 @@ export interface ExecOptions {
   timeoutMs?: number;
   stdin?: NodeJS.ReadableStream;
 }
-export interface ExecResult { code: number; stdout: string; stderr: string }
+export interface ExecResult { code: number; stdout: string; stderr: string; stdoutTruncated?: boolean; stderrTruncated?: boolean }
 export interface Provider {
   readonly profile: Profile;
   readonly stdin: boolean;

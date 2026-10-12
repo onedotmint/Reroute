@@ -1,21 +1,21 @@
-name: Verify
-
+name: Verify native Reroute
 on:
   push:
   pull_request:
   workflow_dispatch:
-
 permissions:
   contents: read
-
+concurrency:
+  group: reroute-verify-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        node: [22, 24]
+        node: ['22', '24']
     env:
       REROUTE_LIVE: '0'
     steps:
@@ -25,36 +25,36 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-      - name: Install standalone setup dependency
+          cache: npm
+          cache-dependency-path: npm-shrinkwrap.json
+      - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Install isolated build tools
-        run: npm run tools:install
-      - name: Check committed dist before any build
-        run: npm run check:dist
-      - name: Strict types
-        run: npm run typecheck
-      - name: Real Daytona SDK declarations (no client or credentials)
-        run: npm run typecheck:sdk
-      - name: Build
-        run: npm run build
-      - name: All non-cloud tests
+      - name: Strict types and build
+        run: npm run typecheck && npm run build
+      - name: Unit, component, provider and actual Pi SDK tests
         run: npm test
-      - name: CLI smoke
+      - name: Offline CLI smoke
         run: npm run smoke
-      - name: Tarball and clean offline prefix installation
+      - name: Install isolated SSH test prerequisites
+        run: sudo apt-get update -qq && sudo apt-get install -y openssh-server rsync
+      - name: Start real localhost OpenSSH server
+        run: bash scripts/ssh-test-server.sh
+      - name: Real SSH, rsync, Pi, artifacts and compiler-cache acceptance
+        run: npm run test:ssh
+      - name: Measure local input preparation
+        run: npm run benchmark
+      - name: Pack and independently install this commit
         run: npm run check:package
-      - name: Pack the verified commit
-        run: |
-          mkdir -p .artifacts
-          npm pack --pack-destination .artifacts
-          printf '%s\n' "$GITHUB_SHA" > .artifacts/COMMIT.txt
-      - name: Upload installable package
+      - name: Upload verified installer and evidence
         uses: actions/upload-artifact@v4
         with:
           name: reroute-npm-node-${{ matrix.node }}-${{ github.sha }}
           path: .artifacts/
           if-no-files-found: error
           retention-days: 30
+      - name: Stop only the isolated test SSH daemon
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/reroute-sshd/pid" ]; then
+            sudo kill "$(cat "$RUNNER_TEMP/reroute-sshd/pid")" || true
+          fi

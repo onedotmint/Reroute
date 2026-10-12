@@ -6,3 +6,4 @@ dist/
 .reroute.json
 .reroute/
 .env*
+__pycache__/

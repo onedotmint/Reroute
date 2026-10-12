@@ -17,7 +17,7 @@ async function list(root: string): Promise<string[]> {
   if (git?.code === 0 && await realpath(git.stdout.trim()) === root) {
     // Never accept a truncated index as a complete source snapshot.
     const candidates = await processExec('git', ['-C', root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard']);
-    if (candidates.code !== 0 || Buffer.byteLength(candidates.stdout) >= 1024 * 1024) throw new Error('Git input index unavailable or exceeds the 1 MiB safety limit; no task started');
+    if (candidates.code !== 0 || candidates.stdoutTruncated || candidates.stdout.includes('\ufffd')) throw new Error('Git input index unavailable, not UTF-8, or exceeds the 1 MiB safety limit; no task started');
     paths = candidates.stdout.split('\0').filter(Boolean);
   } else {
     try { custom.add(await readFile(join(root, '.gitignore'), 'utf8')); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }

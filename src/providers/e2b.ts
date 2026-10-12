@@ -2,6 +2,7 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Profile, Provider, ExecOptions, ExecResult } from '../types.js';
+import { feedInput } from '../util.js';
 export class E2BProvider implements Provider {
   readonly stdin = true;
   private sandbox?: import('e2b').Sandbox;
@@ -20,10 +21,11 @@ export class E2BProvider implements Provider {
     const handle = await sb.commands.run(command, { background: true, stdin: !!options.stdin, timeoutMs: options.timeoutMs ?? 120000, requestTimeoutMs: 15000, signal: options.signal,
       onStdout: s => { stdout = (stdout + s).slice(-1024 * 1024); options.stdout?.(Buffer.from(s)); },
       onStderr: s => { stderr = (stderr + s).slice(-1024 * 1024); options.stderr?.(Buffer.from(s)); } });
-    const input = options.stdin ? (async () => { for await (const chunk of options.stdin!) await handle.sendStdin(chunk); await handle.closeStdin(); })() : Promise.resolve();
-    try { const [result] = await Promise.all([handle.wait(), input]); return { code: result.exitCode, stdout, stderr }; }
+    const input = options.stdin ? feedInput(options.stdin, chunk => handle.sendStdin(chunk), () => handle.closeStdin()) : undefined;
+    const inputFailure = input?.done.then(() => new Promise<never>(()=>{}));
+    try { const result = await Promise.race([handle.wait(), ...(inputFailure ? [inputFailure] : [])]); return { code: result.exitCode, stdout, stderr }; }
     catch (e) { if (e instanceof sdk.CommandExitError) return { code: e.exitCode, stdout, stderr }; throw e; }
-    finally { handle.disconnect(); }
+    finally { input?.stop(); handle.disconnect(); }
   }
   async put(local: string, remote: string): Promise<void> { await (await this.running()).files.write(remote, Readable.toWeb(createReadStream(local)) as ReadableStream, { requestTimeoutMs: 120000 }); }
   async get(remote: string, local: string): Promise<void> { const stream = await (await this.running()).files.read(remote, { format: 'stream', requestTimeoutMs: 120000 }); await pipeline(Readable.fromWeb(stream as import('node:stream/web').ReadableStream<Uint8Array>), createWriteStream(local, { flags: 'wx', mode: 0o600 })); }
