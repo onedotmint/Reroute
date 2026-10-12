@@ -2,6 +2,7 @@
   "name": "reroute",
   "version": "0.3.0-native.3",
   "description": "Keep Pi and source local; offload build, test and compute through native remote tools",
+  "keywords": ["pi-package", "pi-extension", "remote-builds", "development-tools"],
   "type": "module",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/onedotmint/Reroute.git" },
@@ -35,6 +36,6 @@
     "@types/shell-quote": "1.7.5",
     "typescript": "5.9.3"
   },
-  "peerDependencies": { "@earendil-works/pi-coding-agent": ">=0.99.0 <2" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
   "peerDependenciesMeta": { "@earendil-works/pi-coding-agent": { "optional": true } }
 }
