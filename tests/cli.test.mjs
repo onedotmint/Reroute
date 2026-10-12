@@ -26,3 +26,19 @@ test('setup preserves legacy state and unknown command/flags fail',async t=>{
  assert.notEqual((await run('--not-a-real-flag')).code,0);assert.notEqual((await run('exec')).code,0);
  assert.notEqual((await run('resource','resume','--yes')).code,0);
 });
+
+test('credential inspection and forgetting are explicit and never display key values',async t=>{
+ const {run}=await fixture(t);
+ const status=await run('credentials');
+ assert.equal(status.code,0,status.stderr);
+ const parsed=JSON.parse(status.stdout);
+ assert.ok(parsed.credentialSources.daytona);
+ assert.equal(JSON.stringify(parsed).includes('DAYTONA_API_KEY='),false);
+ const unsafe=await run('credentials','forget','--provider','daytona');
+ assert.equal(unsafe.code,125);
+ const forgotten=await run('credentials','forget','--provider','daytona','--yes');
+ assert.equal(forgotten.code,0,forgotten.stderr);
+ const body=JSON.parse(forgotten.stdout);
+ assert.equal(body.scope.includes('local private file'),true);
+ assert.equal(body.provider,'daytona');
+});
