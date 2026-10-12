@@ -39,3 +39,28 @@ test('owned Pi entry is installable, idempotent, and will not overwrite an unkno
  const path=await installPi(root);assert.match(await readFile(path,'utf8'),/Reroute v3 owned/);assert.equal(await installPi(root),path);
  await writeFile(path,'// user extension');await assert.rejects(installPi(root),/unowned/);assert.equal(await readFile(path,'utf8'),'// user extension');
 });
+
+test('Pi overview shows configured profiles and local credential availability without contacting cloud',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'reroute-pi-overview-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ await saveConfig(root,{...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'existing-host'},cloud:{provider:'daytona',id:'existing-sandbox'}}});
+ const menus=['Overview','Close'], notices=[];
+ const ctx={cwd:root,hasUI:true,ui:{select:async()=>menus.shift(),notify:(s)=>notices.push(s),confirm:async()=>{throw Error('No network or resource control on overview');}}};
+ await panel(ctx);
+ assert.match(notices.join('\n'),/cloud \| daytona \| existing-sandbox/);
+ assert.match(notices.join('\n'),/\* ssh \| ssh \| existing-host/);
+ assert.match(notices.join('\n'),/No cloud calls made/);
+});
+test('Pi native menus add and forget local profiles without changing remote resources',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'reroute-pi-management-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ await saveConfig(root,{...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'existing-host'}}});
+ const menus=['Manage providers','Add provider','daytona','Close'];
+ const answers=['cloud','existing-sandbox',''];
+ const ctx={cwd:root,hasUI:true,ui:{
+   select:async()=>menus.shift(),input:async()=>answers.shift(),notify:()=>{},confirm:async()=>true,
+ }};
+ await panel(ctx);
+ const after=(await loadConfig(root)).config;assert.equal(after.active,'cloud');assert.equal(after.profiles.cloud.id,'existing-sandbox');assert.equal(after.profiles.ssh.id,'existing-host');
+ const remove=['Manage providers','Remove local profile','cloud','Close'];
+ await panel({cwd:root,hasUI:true,ui:{select:async()=>remove.shift(),notify:()=>{},confirm:async()=>true}});
+ const final=(await loadConfig(root)).config;assert.equal(final.active,'ssh');assert.deepEqual(Object.keys(final.profiles),['ssh']);
+});
