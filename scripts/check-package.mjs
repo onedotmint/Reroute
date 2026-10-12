@@ -7,6 +7,7 @@ const output=resolve('.artifacts');await mkdir(output,{recursive:true});
 const run=(program,args,options={})=>{const r=spawnSync(program,args,{encoding:'utf8',timeout:120000,...options});assert.equal(r.status,0,`${program}: ${r.stderr||r.stdout||r.error}`);return r.stdout;};
 const pack=JSON.parse(run('npm',['pack','--json','--pack-destination',output]))[0];
 assert.ok(pack.files.some(f=>f.path==='dist/cli.js'));assert.ok(pack.files.some(f=>f.path==='assets/task.py'));assert.ok(pack.files.some(f=>f.path==='adapters/pi.ts'));
+for (const file of ['README.md','DELIVERY.md','NOTICE','LICENSE']) assert.ok(pack.files.some(f=>f.path===file),`Package missing ${file}`);
 for(const file of pack.files)assert.ok(!/(^|\/)(node_modules|\.git|\.env|rerouted|sync-back)/.test(file.path),file.path);
 const clean=await mkdtemp(join(tmpdir(),'reroute-install-'));
 try {

@@ -1,0 +1,31 @@
+# Reroute 0.3 delivery ledger
+
+**Canonical source:** [rebuild/0.3-native](https://github.com/onedotmint/Reroute/tree/rebuild/0.3-native); main and the original 0.2 branch are unchanged. The precise final commit SHA is recorded in each successful CI archive's `COMMIT.txt` / `package-verification.json`, and in the GitHub run's head SHA. Always match those values to the requested source ref. This versioned ledger does not falsely describe an older checkpoint as the final SHA.
+
+**Build:** npm version `0.3.0-native.2`, `npm pack` to `reroute-0.3.0-native.2.tgz`. CI runs locked `npm ci`, strict types/build, tests, real localhost SSH, benchmark, real pack + clean-prefix install/smoke, then uploads the tarball and evidence as `reroute-npm-node-<node>-<sha>`, retention 30 days. No npm publish or GitHub Release.
+
+**Architecture removal (0.2 → 0.3):** removed resident daemon, generic multi-way synchronization and source writeback, merge conflict states, remote dev server/preview, unrelated adapters and legacy protocol. Retained the usable idea of a native Pi Bash interface, Clack setup, conservative command classification, direct compute providers; rebuilt one-way snapshots and a small task supervisor. Uses OpenSSH, rsync, official Daytona/Modal/E2B SDKs, SkyPilot CLI, Pi SDK and TypeScript; no LLM client.
+
+## Verified versus unverified
+
+| Area | Current evidence |
+|---|---|
+| Type checking, build, offline tests and CLI smoke | Node 22 + Node 24 GitHub Actions steps passed in historical run 38225923288; required in final CI |
+| Real SSH | GitHub Ubuntu localhost OpenSSH + rsync: dirty/new/deleted input, separated stdout/stderr/exit, no source writeback, incremental transfer, cache reuse, verified no-overwrite artifact, stdin/EOF, confirmed timeout/cancel, lock serialization, corrupt transfer/symlink refusal |
+| Pi | Real Pi SDK BashOperations actually executed SSH task; extension registration contract tested. **Interactive WSL2 Pi/TUI NOT VERIFIED** |
+| Rust and Node cache | Actual remote npm-ci bootstrap and Cargo cold/warm compilation tested through localhost SSH |
+| Packaging | Actual npm tarball installed into clean prefix, offline `--help` / `doctor` / smoke execution checked; final run artifact must be separately verified |
+| Performance | Synthetic 128 × 64 KiB preparation measurement and localhost SSH test timings saved as JSON in CI artifact; **no proof of real-device CPU/RAM savings or remote speedup** |
+| Daytona | Implemented, offline contract-tested; **LIVE UNVERIFIED** |
+| SkyPilot | Implemented, offline contract-tested; **LIVE UNVERIFIED** |
+| Modal | Implemented, offline contract-tested; **LIVE UNVERIFIED** |
+| E2B | Implemented, offline contract-tested; **LIVE UNVERIFIED** |
+| Cross-machine WSL2 / real network interruption / account billing behavior | **NOT VERIFIED** |
+
+[Historical CI run 38225923288](https://github.com/onedotmint/Reroute/actions/runs/38225923288) passed the build, tests, localhost SSH, benchmark and clean install in both Node versions, but **overall failed** at upload: `actions/upload-artifact@v4` defaults to excluding hidden directories; test files were located in `.artifacts/`. Commit `bc7bd65865b65f7fda31482b1fb8b134afd0596a` adds `include-hidden-files: true`. **Do not use that failed run as an installable artifact.**
+
+**Manual live probe, existing running target only:** with a configured source checkout and explicit billing authorization, `REROUTE_LIVE=1 REROUTE_ALLOW_EXISTING_COMPUTE=1 npm run test:live`. The probe expects native stdout, stderr and exit 7; it never silently provisions or resumes a target. CI intentionally runs no paid cloud resources.
+
+**Known limits:** input snapshots are double-checked but not filesystem-atomic; Git index capture is capped at 1 MiB, total input at 512 MiB, each file at 256 MiB; artifact archive at 256 MiB. Symlink inputs rejected. Shared project execution is serialized. Cancellation or transport state can be unknown and is never reported as confirmed success. SSH host lifecycle is not supported. Per-provider live SDK/CLI behavior is still a validation gap.
+
+**Recovery/install:** checkout the branch or use the actual successful [Verify native Reroute Actions run](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml). Download a `reroute-npm-node-<node>-<sha>` artifact, unzip, compare `COMMIT.txt` with run head SHA, install `npm install -g ./reroute-0.3.0-native.2.tgz` inside WSL2, run `reroute setup` and `reroute doctor --connect` in the project, restart Pi and try `/reroute`. Always report missing/failed CI or live checks as such; no substitute fake tarballs.
