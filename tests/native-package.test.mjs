@@ -26,7 +26,9 @@ test('real Pi CLI owns project-local package install, discovery/listing and remo
  const settings=JSON.parse(await readFile(join(project,'.pi','settings.json'),'utf8'));
  assert.ok(settings.packages?.length,'pi install --local must write project package declaration');
  assert.ok(settings.packages.some(p=>typeof p==='string'||p?.source),'package declaration missing');
- assert.match(invoke(project,env,'list'),/reroute/i);
+ // Pi intentionally hides project packages in noninteractive commands until project trust is granted.
+ assert.match(invoke(project,env,'--approve','list'),/reroute/i);
+ assert.match(invoke(project,env,'--no-approve','list'),/No packages installed/);
  await assert.rejects(stat(join(agent,'extensions','reroute.ts')), /ENOENT/);
  await assert.rejects(stat(join(agent,'settings.json')), /ENOENT/);
  invoke(project,env,'remove','--local',root);
