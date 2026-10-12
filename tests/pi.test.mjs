@@ -64,3 +64,27 @@ test('Pi native menus add and forget local profiles without changing remote reso
  await panel({cwd:root,hasUI:true,ui:{select:async()=>remove.shift(),notify:()=>{},confirm:async()=>true}});
  const final=(await loadConfig(root)).config;assert.equal(final.active,'ssh');assert.deepEqual(Object.keys(final.profiles),['ssh']);
 });
+
+test('Pi natively loads a source-only Git package with NO dist directory or npm build step',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'reroute-source-package-'));
+ t.after(()=>rm(root,{recursive:true,force:true}));
+ const packageDir=join(root,'package'),agent=join(root,'agent');
+ const {cp,symlink,stat}=await import('node:fs/promises');
+ await mkdir(packageDir);
+ await mkdir(agent);
+ await cp(resolve('src'),join(packageDir,'src'),{recursive:true});
+ await cp(resolve('adapters'),join(packageDir,'adapters'),{recursive:true});
+ await symlink(resolve('node_modules'),join(packageDir,'node_modules'),'dir');
+ await writeFile(join(packageDir,'package.json'),JSON.stringify({
+   name:'reroute',type:'module',pi:{extensions:['./adapters/pi.ts']},
+   peerDependencies:{'@earendil-works/pi-coding-agent':'*'}
+ }));
+ await assert.rejects(stat(join(packageDir,'dist')), /ENOENT/);
+ const result=await sdk.discoverAndLoadExtensions([join(packageDir,'adapters','pi.ts')],root,agent);
+ assert.deepEqual(result.errors,[]);
+ const extension=result.extensions[0];
+ assert.ok(extension);
+ assert.ok(extension.commands.has('reroute'));
+ assert.ok(extension.tools.has('bash'));
+ assert.ok(extension.handlers.has('user_bash'));
+});

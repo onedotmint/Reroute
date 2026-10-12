@@ -9,7 +9,7 @@
   "bin": { "reroute": "bin/reroute.mjs" },
   "exports": { ".": "./dist/engine.js", "./pi": "./adapters/pi.ts" },
   "pi": { "extensions": ["./adapters/pi.ts"] },
-  "files": ["bin/reroute.mjs", "dist", "adapters", "assets", "README.md", "DELIVERY.md", "LICENSE", "NOTICE", "docs", "npm-shrinkwrap.json"],
+  "files": ["bin/reroute.mjs", "dist", "src", "adapters", "assets", "README.md", "DELIVERY.md", "LICENSE", "NOTICE", "docs", "npm-shrinkwrap.json"],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
