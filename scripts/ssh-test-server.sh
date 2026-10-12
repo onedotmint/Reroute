@@ -22,13 +22,16 @@ AuthorizedKeysFile $base/authorized_keys
 StrictModes no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
-UsePAM no
+UsePAM yes
 AllowUsers $(id -un)
 PermitRootLogin no
-LogLevel ERROR
+LogLevel VERBOSE
 Subsystem sftp internal-sftp
 CFG
 sudo mkdir -p /run/sshd
+# PAM performs account/session checks for the runner's password-locked account.
+# Password and keyboard-interactive authentication remain disabled.
+trap 'code=$?; if [ "$code" -ne 0 ] && [ -f "$base/server.log" ]; then sudo tail -n 60 "$base/server.log" >&2; fi; exit "$code"' ERR
 sudo /usr/sbin/sshd -f "$base/sshd_config" -E "$base/server.log"
 # Pin the key generated above, rather than accepting an unverified scanned key.
 printf '[127.0.0.1]:%s %s\n' "$port" "$(cat "$base/host.pub")" >> "$HOME/.ssh/known_hosts"
