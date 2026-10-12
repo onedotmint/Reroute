@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { transformHook } from '../../dist/adapters/hooks.js';
 import { bridgeCommand } from '../../dist/core/activation.js';
 import { registerPi } from '../../adapters/pi.mjs';
-import omp from '../../adapters/omp.mjs';
 import opencode from '../../adapters/opencode.mjs';
 import { rerouteExecutor } from '../../adapters/deepseek.mjs';
 import { mergeHookFile, installHarness, HARNESSES } from '../../dist/cli/setup.js';
@@ -25,7 +24,7 @@ for(const host of ['claude','codex','cursor']) {
 test('Pi retains native Bash definition and user-shell options',async()=>{
   const callbacks={};let registered,config,seen;
   const sdk={createBashTool:(cwd,options)=>{config=options;return {name:'bash',parameters:{native:true},cwd};},createLocalBashOperations:()=>({exec:async(...args)=>{seen=args;return {exitCode:13};}})};
-  registerPi({registerTool:tool=>registered=tool,on:(name,fn)=>callbacks[name]=fn},sdk);
+  registerPi({registerTool:tool=>registered=tool,registerCommand:()=>{},on:(name,fn)=>callbacks[name]=fn},sdk);
   assert.equal(registered.name,'bash');assert.equal(registered.parameters.native,true);
   const spawned=config.spawnHook({command:'cargo test',cwd:'/local',env:{PATH:'/usr/bin',TEST:'x'}});
   assert.equal(spawned.command,'cargo test');assert.ok(spawned.env.PATH.endsWith('/usr/bin'));assert.equal(spawned.env.TEST,'x');
@@ -33,13 +32,7 @@ test('Pi retains native Bash definition and user-shell options',async()=>{
   const result=await callbacks.user_bash().operations.exec('pytest','/local',options);
   assert.equal(result.exitCode,13);assert.equal(seen[2],options);assert.equal(seen[0],bridgeCommand('pytest'));
 });
-test('OMP uses current input replacement, not the incompatible Pi operation surface',()=>{
-  let callback;omp({on:(name,cb)=>{assert.equal(name,'tool_call');callback=cb;}});
-  assert.equal(callback({toolName:'read'}),undefined);
-  const result=callback({toolName:'bash',input:{command:'pytest',timeout:20}});
-  assert.equal(result.input.command,bridgeCommand('pytest'));assert.equal(result.input.timeout,20);
-  assert.equal(callback({toolName:'bash',input:{}}).block,true);
-});
+
 test('OpenCode v2 hooks only shell creation and keeps command fields',async()=>{
   let callback;await opencode.setup({shell:{hook:async(name,fn)=>{assert.equal(name,'create.before');callback=fn;}}});
   const event={command:'pnpm test',cwd:'/project',timeout:90,env:{PATH:'/bin',MY_VALUE:'x'}};callback(event);
@@ -61,11 +54,12 @@ test('hook installation is idempotent and preserves unrelated settings',async t=
   assert.equal(result.theme,'custom');assert.deepEqual(result.hooks.PreToolUse[0],foreign);assert.equal(result.hooks.PreToolUse.length,2);
   await fs.writeFile(file,'not JSON');await assert.rejects(()=>mergeHookFile(file,'claude'));assert.equal(await fs.readFile(file,'utf8'),'not JSON');
 });
-test('all seven adapter installation paths are produced without editing unrelated files',async t=>{
+test('all supported adapter installation paths are produced without editing unrelated files',async t=>{
   const f=await fixture(t),oldHome=process.env.REROUTE_HOME,oldAgent=process.env.REROUTE_AGENT_HOME;
   process.env.REROUTE_HOME=join(f.directory,'home');process.env.REROUTE_AGENT_HOME=f.local;
   t.after(()=>{for(const [key,value] of [['REROUTE_HOME',oldHome],['REROUTE_AGENT_HOME',oldAgent]]){if(value===undefined)delete process.env[key];else process.env[key]=value;}});
   for(const id of HARNESSES)assert.equal(typeof await installHarness(id),'string');
-  assert.ok((await fs.readFile(join(f.local,'.pi/agent/extensions/reroute.ts'),'utf8')).includes('registerPi'));
+   const pi = await fs.readFile(join(f.local,'.pi/agent/extensions/reroute.ts'),'utf8');
+   assert.match(pi, /import \* as tui from '@earendil-works\/pi-tui'/); assert.match(pi, /registerPi\(pi, sdk, tui\)/);
   const cursor=JSON.parse(await fs.readFile(join(f.local,'.cursor/hooks.json'),'utf8'));assert.equal(cursor.hooks.preToolUse[0].failClosed,true);
 });

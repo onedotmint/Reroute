@@ -25,17 +25,22 @@ export function checkPackage(project = root) {
       return result.stdout;
     };
     const manifest = JSON.parse(readFileSync(join(project, 'package.json'), 'utf8'));
-    assert.equal(Object.keys(manifest.dependencies ?? {}).length, 0, 'core must have zero runtime dependencies');
+    assert.deepEqual(Object.keys(manifest.dependencies ?? {}), ['@clack/prompts'], 'only the standalone setup UI adds a runtime dependency');
+    assert.deepEqual(manifest.bundleDependencies, ['@clack/prompts'], 'bundle the small prompt library for offline installation');
     const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
     const [packed] = JSON.parse(run(npm, ['pack', project, '--pack-destination', temporary, '--ignore-scripts', '--json', '--offline']));
     const paths = packed.files.map(file => file.path);
+    const bundled = ['@clack/core', '@clack/prompts', 'fast-string-truncated-width', 'fast-string-width', 'fast-wrap-ansi', 'sisteransi'];
+    assert.deepEqual([...packed.bundled].sort(), bundled, 'do not bundle host runtimes or provider SDKs');
+    for (const id of bundled) assert(paths.some(path => path.toLowerCase() === `node_modules/${id}/license`), `missing bundled license: ${id}`);
     for (const required of ['bin/reroute.mjs', 'bin/rerouted.mjs', 'dist/cli/main.js', 'dist/core/contracts.js', 'assets/worker.py', 'package.json', 'README.md', 'LICENSE', 'NOTICE']) {
       assert(paths.includes(required), `npm tarball is missing ${required}`);
     }
     for (const path of paths) {
-      assert(!path.split('/').some(part => ['.git', '.tools', 'node_modules', '.reroute', '..'].includes(part) || part === '.env' || part.startsWith('.env.')) && !/\.(key|pem|p12|pfx)$/.test(path), `unsafe npm tarball path: ${path}`);
+      if (path.startsWith('node_modules/')) assert(bundled.some(id => path.startsWith(`node_modules/${id}/`)), `unexpected bundled path: ${path}`);
+      assert(!path.split('/').some(part => ['.git', '.tools', '.reroute', '..'].includes(part) || part === '.env' || part.startsWith('.env.')) && !/\.(key|pem|p12|pfx)$/.test(path), `unsafe npm tarball path: ${path}`);
     }
-    // An empty, offline cache proves this install does not fetch hidden dependencies.
+    // Bundled Clack and its transitive dependencies need no registry access.
     run(npm, ['install', '--prefix', prefix, '--ignore-scripts', '--offline', '--no-audit', '--no-fund', '--package-lock=false', join(temporary, packed.filename)]);
     const installed = join(prefix, 'node_modules', manifest.name);
     assert.equal(JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')).version, manifest.version);
@@ -43,7 +48,7 @@ export function checkPackage(project = root) {
     assert(existsSync(cli), 'npm did not install the reroute executable');
     assert(existsSync(join(prefix, 'node_modules', '.bin', process.platform === 'win32' ? 'rerouted.cmd' : 'rerouted')), 'npm did not install the rerouted executable');
     assert.match(run(cli, ['--help'], prefix), /Reroute.*local source, remote project execution/);
-    run(process.execPath, ['--input-type=module', '-e', "await import('reroute')"], prefix);
+    run(process.execPath, ['--input-type=module', '-e', "await import('reroute'); await import('./node_modules/reroute/dist/cli/wizard.js')"], prefix);
     console.log('npm tarball, clean offline prefix install, installed CLI and core export passed.');
   } finally {
     rmSync(temporary, { recursive: true, force: true });

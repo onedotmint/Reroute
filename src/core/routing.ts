@@ -7,15 +7,43 @@ export const RUNTIME_COMMANDS = [
   'cmake', 'make', 'ninja', 'gcc', 'g++', 'clang', 'clang++', 'cc', 'c++', 'ctest',
   'go', 'java', 'javac', 'mvn', 'gradle'
 ];
-const CONTROL = new Set(['git','gh','rg','grep','find','ls','cat','sed','awk','ssh','scp','rsync','sky','daytona','modal','e2b','aws','gcloud','az','kubectl','docker','podman','reroute']);
-const IDENTITY = new Set(['publish','login','logout','whoami','deploy','token','tokens','auth','owner','owners','config','credential','credentials']);
-export function routingDecision(argv: string[], commands = RUNTIME_COMMANDS): { executable: string; route: 'local' | 'remote'; rule: string } {
+const CONTROL = new Set(['git','gh','rg','grep','find','ls','cat','sed','awk','ssh','scp','rsync','sky','daytona','modal','e2b','aws','gcloud','az','kubectl','docker','podman','reroute','bash','sh','zsh','fish','cmd','powershell','pwsh','env','sudo','su','rm','mv','cp','chmod','chown','curl','wget','xargs']);
+const IDENTITY = new Set(['publish','login','logout','whoami','deploy','release','token','tokens','auth','owner','owners','config','credential','credentials']);
+export const TASK_CATEGORIES = ['build', 'test', 'check', 'benchmark'] as const;
+export type TaskCategory = typeof TASK_CATEGORIES[number];
+type TaskRules = { mode?: 'tasks'|'legacy'; tasks?: TaskCategory[]; local?: string[][]; remote?: string[][] };
+export function routingDecision(argv: string[], commands = RUNTIME_COMMANDS, rules: TaskRules = {}, explicit = false): { executable: string; route: 'local' | 'remote'; rule: string } {
   const executable = basename(argv[0] ?? '').replace(/\.(exe|cmd)$/i, '');
-  if (CONTROL.has(executable)) return { executable, route: 'local', rule: 'control-command' };
-  if (['cargo','npm','npx','pnpm','yarn','bun','uv','poetry','pdm','deno'].includes(executable) && argv.slice(1).some(x => IDENTITY.has(x))) return { executable, route: 'local', rule: 'identity-subcommand' };
-  return commands.includes(executable) ? { executable, route: 'remote', rule: 'configured-runtime-command' } : { executable, route: 'local', rule: 'not-configured-runtime-command' };
+  const decision = (route: 'local'|'remote', rule: string) => ({ executable, route, rule });
+  if (CONTROL.has(executable)) return decision('local', 'control-command');
+  if (['cargo','npm','npx','pnpm','yarn','bun','uv','poetry','pdm','deno','pip','pip3','mvn','gradle','make','ninja','cmake','go'].includes(executable) && argv.slice(1).some(x => x.split(':').some(part => IDENTITY.has(part)))) return decision('local', 'identity-subcommand');
+  if (!executable || /[\0\r\n\s]/.test(argv[0] ?? '') || argv.some(x => ['&&','||',';','|','>','>>','<','&'].includes(x))) return decision('local', 'ambiguous-command');
+  if (explicit) return decision('remote', 'explicit-remote');
+  if (argv.slice(1).some(x => ['--version','--help','-V','-h'].includes(x))) return decision('local', 'lightweight-command');
+  const matches = (prefix: string[]) => prefix.every((arg, i) => (i === 0 ? executable : argv[i]) === arg);
+  if (rules.local?.some(matches)) return decision('local', 'project-local-rule');
+  if (!commands.includes(executable)) return decision('local', 'not-configured-runtime-command');
+  if (rules.remote?.some(matches)) return decision('remote', 'project-remote-rule');
+  if (rules.mode === 'legacy') return decision('remote', 'configured-runtime-command');
+  if (argv.length < 2 && !['pytest','ctest','make','ninja'].includes(executable)) return decision('local', 'lightweight-command');
+  const sub = argv[1] ?? '', script = sub === 'run' || sub === 'run-script' ? argv[2] ?? '' : sub;
+  const heavy =
+    (executable === 'cargo' && ['build','test','check','bench','clippy'].includes(sub)) ||
+    (['npm','pnpm','yarn','bun'].includes(executable) && /^(?:build|test|check|lint|bench)(?::[A-Za-z0-9_-]+)*$/.test(script)) ||
+    (['make','ninja'].includes(executable) && ['', 'all','build','test','check','bench'].includes(sub)) ||
+    (['pytest','ctest','rustc','gcc','g++','clang','clang++','cc','c++','javac','mypy'].includes(executable)) ||
+    (executable === 'cmake' && ['--build','--workflow'].includes(sub)) ||
+    (executable === 'go' && ['build','test'].includes(sub)) ||
+    (['mvn','gradle'].includes(executable) && ['build','test','check','compile','package','verify'].includes(sub)) ||
+    (executable === 'ruff' && ['check','format'].includes(sub)) ||
+    (executable === 'deno' && ['test','bench','check','compile'].includes(sub));
+  if (!heavy) return decision('local', 'unknown-or-light-task');
+  const category: TaskCategory = ['pytest','ctest'].includes(executable) || /^(test)(:|$)/.test(script) ? 'test' :
+    /^(bench)(:|$)/.test(script) ? 'benchmark' :
+    ['ruff','mypy'].includes(executable) || /^(check|lint|clippy|verify)(:|$)/.test(script) ? 'check' : 'build';
+  return rules.tasks && !rules.tasks.includes(category) ? decision('local', 'task-category-disabled') : decision('remote', 'heavy-task-candidate');
 }
-export function route(argv: string[], commands = RUNTIME_COMMANDS): 'local' | 'remote' { return routingDecision(argv, commands).route; }
+export function route(argv: string[], commands = RUNTIME_COMMANDS, rules: TaskRules = {}, explicit = false): 'local' | 'remote' { return routingDecision(argv, commands, rules, explicit).route; }
 const SECRET_NAME = /(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|PRIVATE_?KEY|AUTHORIZATION|COOKIE|SESSION|^AWS_|^AZURE_|^GOOGLE_|^GITHUB_|^GH_|^DAYTONA_|^MODAL_|^E2B_|^DSH_)/i;
 const CONTROL_ENV = /^(?:PATH|HOME|USER|LOGNAME|SHELL|PWD|OLDPWD|SHLVL|_|NODE_OPTIONS|NODE_PATH|PYTHONPATH|PYTHONHOME|BASH_ENV|ENV|SSH_.*|REROUTE_.*|LD_.*|DYLD_.*|XDG_.*)$/;
 export function isControlEnv(key: string): boolean { return CONTROL_ENV.test(key); }

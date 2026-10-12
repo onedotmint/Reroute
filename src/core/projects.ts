@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { join, dirname, basename, resolve } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ProjectState, ProviderId } from './contracts.js';
 import { invariant, errorCode } from './errors.js';

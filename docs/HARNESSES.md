@@ -1,18 +1,20 @@
 # Harness integrations
 
-`reroute setup` configures only Reroute itself by default; discovery is informational.
+Noninteractive `reroute setup` without project flags configures only Reroute itself;
+human TTY setup can guide explicit project/provider selection. Harness discovery
+is informational, never permission to install an adapter.
 Use explicit `--harness pi` (or a comma-separated list) to activate adapters, and restart
 the selected host. `doctor --fix` must not install a merely detected harness.
 
 These adapters preserve a native shell/Bash tool. They never define a model-facing
 `remote_exec`, contain provider logic, or inject sandbox identifiers into prompts.
-Every adapter has protocol fixtures. **No actual harness binary was installed or
-launched during delivery**, so fixtures are not equivalent to host integration tests.
+Every adapter has protocol fixtures. Pi's native management TUI is locally checked
+against Pi 1.1.0; remote Bash/cloud integration and other native hosts still need
+separate acceptance. See [interactive management](INTERACTIVE.md).
 
 | Harness | Implemented entry point | Activation | Delivery qualification |
 | --- | --- | --- | --- |
-| Pi | native `createBashTool` spawn hook + user-shell operations | `reroute setup --harness pi`, then restart | locally verified protocol; native host unverified |
-| OMP | current `tool_call` input replacement | `reroute setup --harness omp`, then restart | Bash tool only; user shell/Python tools not covered |
+| Pi | native `createBashTool` spawn hook + user-shell operations | `reroute setup --harness pi`, then restart | native management TUI checked; remote Bash/cloud path unverified |
 | Claude Code | `PreToolUse` / `hookSpecificOutput.updatedInput` | `reroute setup --harness claude`, review hook trust | native permissions retained; host unverified |
 | Codex CLI | `PreToolUse`, `updatedInput` plus required allow | explicit `--allow-codex-hook` opt-in | approval semantics differ; see warning below |
 | Cursor | native `preToolUse` / `updated_input`, `failClosed` | `reroute setup --harness cursor`, review native hooks | host/schema-version compatibility unverified |
@@ -25,8 +27,8 @@ Gemini CLI and GitHub Copilot CLI are deliberately absent.
 ## Pi
 
 The installer creates `~/.pi/agent/extensions/reroute.ts`, importing the host's
-`@earendil-works/pi-coding-agent` and this package's adapter using an absolute file
-URL. It retains the native Bash tool definition, streaming callbacks, abort options,
+`@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui` and this package's adapter
+using an absolute file URL. It retains the native Bash tool definition, streaming callbacks, abort options,
 output truncation and result shape. Only spawn environment is changed. The native
 user-shell execution options delegate through the same local bridge.
 
@@ -35,13 +37,23 @@ and its extension API. If another extension also replaces Bash, resolve that hos
 conflict explicitly rather than stacking replacements without checking behavior.
 Setup detects directories/binaries, not every possible compatibility conflict.
 
-## OMP
+## Legacy OMP migration (no longer supported)
 
-The installed extension uses current OMP `tool_call` input replacement. It does
-not pretend Pi's user-shell operations object exists in OMP. OMP's separate Python
-tool and user `!` shell are outside this adapter; `reroute shell -- '...'` remains the
-explicit bridge for user commands. Claims of full OMP execution interception would
-be inaccurate for this preview.
+OMP is no longer detected, installed or repaired. `setup --harness omp` is rejected.
+An existing `~/.omp/agent/extensions/reroute.ts` may still reference the removed
+adapter module; restart OMP only after reviewing that stale extension.
+
+Use `reroute uninstall --harness omp` explicitly to remove an unchanged, recorded
+Reroute extension. Default uninstall does not select legacy OMP. Cleanup still checks
+the expected current home, content hash and symlinks; modified, unrecorded or unsafe
+files are preserved. `doctor` warns about legacy entries or an unrecorded extension,
+and `doctor --fix` never reinstalls OMP, even when a recorded file is missing.
+
+For preserved files, back up and review the exact extension manually; remove only
+confirmed Reroute code. Do not delete `.omp`, reset user settings, or restore a whole
+configuration backup. Reroute does not edit OMP's user configuration. This cleanup
+does not stop runtimes or remove SDKs/credentials. Use `reroute shell -- '...'` as an
+explicit CLI bridge, or explicitly install a supported harness such as Pi.
 
 ## Claude and Cursor
 
@@ -128,7 +140,8 @@ identity-bearing composite workflows explicit and local.
 Use `reroute uninstall --harness pi` (or a comma-separated selection) to remove only
 unchanged Reroute-owned files and exact owned hook entries. User-edited files and
 other hooks/settings are preserved and reported; a repeat uninstall is harmless.
-`reroute uninstall` targets the recorded adapters, not project runtimes, SDKs, secrets,
+`reroute uninstall` targets recorded supported adapters (legacy OMP requires explicit
+`--harness omp`), not project runtimes, SDKs, secrets,
 backups or arbitrary global configuration. Stop/sync resources separately, then remove
 the npm package if desired. It does not imply cloud cleanup or zero billing.
 

@@ -5,6 +5,7 @@ export interface RunInput {
     argv: string[];
     env: Record<string, string>;
     timeoutMs?: number;
+    explicit?: boolean;
 }
 export interface RunHooks {
     signal?: AbortSignal;
@@ -29,6 +30,7 @@ export declare class Coordinator {
     start(cwd: string): Promise<ProjectState>;
     run(input: RunInput, hooks?: RunHooks): Promise<ExecutionExit>;
     synchronize(cwd: string, acceptLocal?: boolean): Promise<unknown>;
+    artifacts(cwd: string): Promise<unknown>;
     devStart(input: RunInput, port?: number): Promise<{
         id: string;
         port?: number;

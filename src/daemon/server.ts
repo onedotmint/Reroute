@@ -9,7 +9,7 @@ import { createProvider } from '../providers/index.js';
 import { RerouteError, invariant, safeMessage, errorCode } from '../core/errors.js';
 import { home, privateDir, atomicWrite, writeJSON } from '../platform/files.js';
 import { isSecretName, isControlEnv } from '../core/routing.js';
-import { PROVIDERS, loadConfig } from '../config/config.js';
+import { PROVIDERS } from '../config/config.js';
 import { endpoint, send, lines } from './protocol.js';
 import { log } from '../core/logging.js';
 function runInput(p: Record<string, unknown>): RunInput {
@@ -17,7 +17,8 @@ function runInput(p: Record<string, unknown>): RunInput {
   invariant(p.env && typeof p.env === 'object' && !Array.isArray(p.env), 'IPC_PROTOCOL', 'Invalid execution environment');
   for (const [key, value] of Object.entries(p.env)) invariant(/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !isSecretName(key) && !isControlEnv(key) && typeof value === 'string', 'IPC_PROTOCOL', 'Unsafe environment forwarding');
   if (p.timeoutMs !== undefined) invariant(typeof p.timeoutMs === 'number' && Number.isFinite(p.timeoutMs) && p.timeoutMs > 0, 'IPC_PROTOCOL', 'Invalid execution timeout');
-  return { cwd: p.cwd, argv: p.argv as string[], env: p.env as Record<string, string>, timeoutMs: p.timeoutMs as number | undefined };
+  if (p.explicit !== undefined) invariant(typeof p.explicit === 'boolean', 'IPC_PROTOCOL', 'Invalid routing override');
+  return { cwd: p.cwd, argv: p.argv as string[], env: p.env as Record<string, string>, timeoutMs: p.timeoutMs as number | undefined, explicit: p.explicit as boolean|undefined };
 }
 export async function serve(coordinator = new Coordinator(createProvider)): Promise<{ close: () => Promise<void> }> {
   await privateDir(home());
@@ -66,13 +67,13 @@ export async function serve(coordinator = new Coordinator(createProvider)): Prom
           case 'enable': {
             invariant(PROVIDERS.includes(packet.provider as ProviderId), 'CONFIG', 'Invalid provider');
             const override = packet.override && typeof packet.override === 'object' ? packet.override as Record<string, unknown> : {};
-            await loadConfig(cwd, { ...override, provider: packet.provider });
             value = await coordinator.enable(cwd, packet.provider as ProviderId, override, packet.fresh === true); break;
           }
           case 'disable': value = await coordinator.disable(cwd); break;
           case 'start': value = await coordinator.start(cwd); break;
           case 'stop': value = await coordinator.stop(cwd, packet.destroy === true); break;
           case 'status': value = await coordinator.status(cwd); break;
+          case 'artifacts': value = await coordinator.artifacts(cwd); break;
           case 'sync': value = await coordinator.synchronize(cwd, packet.acceptLocal === true); break;
           case 'run': {
             const result = await coordinator.run(runInput(packet), { signal: abort.signal,

@@ -10,7 +10,7 @@
 | 项目 `outboard.toml` | 项目 `reroute.toml` |
 | `~/.outboard/` / 项目 `.outboard/` | `~/.reroute/` / 项目 `.reroute/` |
 | `OUTBOARD_*` 环境变量 | `REROUTE_*` 环境变量 |
-| Pi / OMP 扩展 `outboard.ts` | `reroute.ts` |
+| Pi 扩展 `outboard.ts` | `reroute.ts` |
 | DeepSeek `outboardExecutor` | `rerouteExecutor` |
 | 远程目录/资源标记 `outboard` / `ob-` | `reroute` / `reroute-` |
 
@@ -31,3 +31,12 @@
 同步仍强制排除 `.outboard/` 和 `.outboard-runtime/`，防止迁移期间把旧机器状态当源码传输；这不是自动迁移。
 确认旧资源已收尾后再自行清理旧状态目录。不要仅更名 `.outboard/` 就假设完成迁移。
 原始交付报告与日志保留旧名称是为了保留证据，见 [DELIVERY.md](DELIVERY.md)。
+
+## OMP 支持移除
+
+Reroute 不再检测、安装或修复 OMP 扩展；不要用 `setup --harness omp` 迁移。
+已有 Reroute 扩展请显式执行 `reroute uninstall --harness omp`：只清理当前 home
+内有所有权记录且哈希未变的文件，用户修改、符号链接或无记录文件会保留。
+默认 uninstall 不选择旧 OMP，doctor 只提示且不会重新安装。保留的旧扩展需备份后
+手动审查，只移除确认属于 Reroute 的代码，不删除 `.omp` 或重置用户配置。
+详见[代理指南](HARNESSES.md#legacy-omp-migration-no-longer-supported)。

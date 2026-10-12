@@ -11,11 +11,15 @@ Use Node.js 22+ and Python 3 for worker integration tests:
 ```sh
 git clone https://github.com/onedotmint/Reroute.git
 cd Reroute
+npm ci --ignore-scripts
 npm run tools:install
 npm run verify:release
 ```
 
-Build tools are kept in ignored `.tools/`; the core has no runtime npm dependencies.
+Build tools are kept in ignored `.tools/`. Only standalone interactive setup loads
+`@clack/prompts`; core/daemon and Pi do not load a second terminal renderer.
+Clack and its small MIT-licensed dependency tree are bundled in npm tarballs so
+isolated offline installs still work. Source checkouts need `npm ci --ignore-scripts`.
 Build output is checked in so a source snapshot can run before installing a compiler.
 Edit `src/`, not `dist/`, and regenerate `dist/` before sharing a source change.
 `npm test` alone tests the compiled files; it does not rebuild TypeScript.
@@ -29,7 +33,7 @@ are developer test inputs, not a new runtime dependency or live compatibility pr
 
 Optional cloud SDKs are installed separately by `reroute setup --install-sdk ...`.
 Do not commit credentials, `.tools/`, provider SDK installs or machine-local state.
-The npm and pnpm lockfiles describe the dependency-free core; npm is the verified
+The npm and pnpm lockfiles pin the standalone prompt dependency; npm is the verified
 build/test path. Provider credentials are not required for local tests.
 
 ## Module boundaries

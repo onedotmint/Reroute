@@ -4,7 +4,9 @@ import { isSecretName } from '../core/routing.js';
 import { randomUUID } from 'node:crypto';
 import type { FileEntry, Manifest, FileTransport, SyncPolicy, FileChange } from '../core/contracts.js';
 import { invariant, errorCode, RerouteError } from '../core/errors.js';
-import { atomicWrite, hash, readJSON, writeJSON, safePath, safeRelative, privateDir } from '../platform/files.js';
+import { hash, readJSON, writeJSON, safePath, safeRelative, privateDir } from '../platform/files.js';
+import { hashFile, stageDownload, copyVerified } from '../platform/file-stream.js';
+import { HashCache } from './hash-cache.js';
 // Legacy state must stay private even before users finish the rename migration.
 const EXCLUDED = new Set(['.git','.reroute','.reroute-runtime','.outboard','.outboard-runtime','node_modules','target','.venv','venv','dist','build','.next','.nuxt','.turbo','coverage','__pycache__','.pytest_cache','.mypy_cache','.ruff_cache','.cache','.gradle','.idea','.ssh','.aws','.azure','.kube','.gnupg','.npm','.rustup','.claude','.codex','.cursor','.pi','.omp','.dsh','gcloud']);
 const SECRET_FILES = new Set(['.npmrc','.pypirc','.netrc','.git-credentials','credentials','credentials.json','secrets.json','id_rsa','id_ed25519','id_ecdsa','service-account.json','application_default_credentials.json','.modal.toml','auth.json']);
@@ -34,6 +36,7 @@ function exclusion(path: string, policy: SyncPolicy): Exclusion | undefined {
 }
 export function excluded(path: string, policy: SyncPolicy): boolean { return exclusion(path, policy) !== undefined; }
 function validatePolicy(policy: SyncPolicy): void {
+  invariant(policy.hashMode === undefined || policy.hashMode === 'strict' || policy.hashMode === 'metadata', 'CONFIG', 'Invalid sync hash mode');
   invariant(Array.isArray(policy.excludes) && policy.excludes.every(validSyncPattern), 'CONFIG', 'Unsupported sync pattern; use literals, *, ?, or a complete ** path segment');
   invariant(Number.isSafeInteger(policy.maxFiles) && policy.maxFiles > 0 && Number.isSafeInteger(policy.maxFileBytes) && policy.maxFileBytes > 0, 'CONFIG', 'Sync limits must be positive safe integers');
 }
@@ -65,17 +68,17 @@ async function walkLocal(root: string, policy: SyncPolicy, visit: (rel: string, 
     await walk(root, '');
   });
 }
-export async function scanLocal(root: string, policy: SyncPolicy): Promise<Manifest> {
-  const result: Manifest = Object.create(null);
+export async function scanLocal(root: string, policy: SyncPolicy, cache = new HashCache()): Promise<Manifest> {
+  root = resolve(root);
+  const result: Manifest = Object.create(null); let count = 0;
   await walkLocal(root, policy, async (rel, entry, reason) => {
     if (reason || entry.isDirectory()) return;
     invariant(entry.isFile(), 'SOURCE_TYPE', `Unsupported source file (symlinks are not followed): ${rel}`);
-    const path = await safePath(root, rel), st = await fs.lstat(path);
-    invariant(st.size <= policy.maxFileBytes, 'FILE_TOO_LARGE', `Source file exceeds sync limit: ${rel}`);
-    const data = await fs.readFile(path);
-    result[rel] = { hash: hash(data), size: data.length, mode: st.mode & 0o777 };
-    invariant(Object.keys(result).length <= policy.maxFiles, 'TOO_MANY_FILES', 'Source tree exceeds file-count limit');
+    const path = await safePath(root, rel);
+    result[rel] = await cache.scan(path, policy.maxFileBytes, policy.hashMode);
+    invariant(++count <= policy.maxFiles, 'TOO_MANY_FILES', 'Source tree exceeds file-count limit');
   });
+  cache.prune(Object.keys(result).map(path => join(resolve(root), path)));
   return result;
 }
 export interface SyncPreview {
@@ -151,7 +154,7 @@ async function currentHash(root: string, path: string): Promise<string | null> {
     const destination = await safePath(root, path), info = await fs.lstat(destination);
     if (info.isDirectory()) return null;
     invariant(info.isFile(), 'SOURCE_TYPE', 'Synchronized path is not a regular file');
-    return hash(await fs.readFile(destination));
+    return (await hashFile(destination)).hash;
   } catch (error) { if (['ENOENT', 'ENOTDIR'].includes(errorCode(error) ?? '')) return null; throw error; }
 }
 async function removeEmptyDirectories(root: string, path: string, policy: SyncPolicy): Promise<void> {
@@ -166,15 +169,15 @@ async function removeEmptyDirectories(root: string, path: string, policy: SyncPo
   await visit(path);
   for (const rel of directories) await fs.rmdir(await safePath(root, rel));
 }
-async function applyLocal(root: string, path: string, expected: string | null, data: Buffer | undefined, mode: number, policy: SyncPolicy): Promise<void> {
+async function applyLocal(root: string, path: string, expected: string | null, temp: string | undefined, mode: number, policy: SyncPolicy): Promise<void> {
   const check = async () => invariant(await currentHash(root, path) === expected, 'SYNC_RACE', `Local source changed during reconciliation: ${path}`);
   await check();
   if (expected !== null) {
-    const old = await fs.readFile(await safePath(root, path));
-    invariant(hash(old) === expected, 'SYNC_RACE', `Local source changed before backup: ${path}`);
-    await atomicWrite(join(root, '.reroute', 'backups', randomUUID()), old);
+    const backup = await safePath(root, '.reroute/backups/' + randomUUID());
+    await privateDir(dirname(backup));
+    await copyVerified(await safePath(root, path), backup, expected);
   }
-  if (data === undefined) {
+  if (temp === undefined) {
     await check();
     if (expected !== null) await fs.unlink(await safePath(root, path));
     return;
@@ -183,9 +186,7 @@ async function applyLocal(root: string, path: string, expected: string | null, d
   try { if ((await fs.lstat(destination)).isDirectory()) await removeEmptyDirectories(root, path, policy); }
   catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
   await fs.mkdir(dirname(destination), { recursive: true }); await safePath(root, path);
-  const temp = join(dirname(destination), `.reroute-tmp-${randomUUID()}.tmp`);
   try {
-    await fs.writeFile(temp, data, { flag: 'wx', mode: mode & 0o777 });
     await fs.chmod(temp, mode & 0o777);
     // Check after backup/temp preparation, not just before its asynchronous writes.
     await check(); await fs.rename(temp, destination);
@@ -193,12 +194,24 @@ async function applyLocal(root: string, path: string, expected: string | null, d
 }
 /** Three-way, crash-recoverable, incremental reconciliation. Call under a project lane. */
 export class Synchronizer {
+  private readonly hashes = new HashCache();
+  private hashIdentity?: string;
+  private resetRemote = true;
+  resetHashes(): void { this.hashes.clear(); this.resetRemote = true; }
   constructor(private readonly root: string, private readonly policy: SyncPolicy) {}
   async reconcile(transport: FileTransport): Promise<{ pushed: number; pulled: number }> {
+    if (this.resetRemote || this.hashIdentity !== transport.hashIdentity) {
+      this.hashes.clear(); transport.invalidateHashes?.();
+      this.hashIdentity = transport.hashIdentity; this.resetRemote = false;
+    }
+    try { return await this.reconcileFiles(transport); }
+    catch (error) { this.resetHashes(); transport.invalidateHashes?.(); throw error; }
+  }
+  private async reconcileFiles(transport: FileTransport): Promise<{ pushed: number; pulled: number }> {
     const baselinePath = join(this.root, '.reroute', 'sync-base.json');
     const savedBase = await readJSON<Manifest>(baselinePath) ?? {}, base: Manifest = Object.create(null);
     for (const [path, entry] of Object.entries(savedBase)) { safeRelative(path); if (!excluded(path, this.policy)) base[path] = entry; }
-    const local = await scanLocal(this.root, this.policy), remote = await transport.scan(this.policy);
+    const local = await scanLocal(this.root, this.policy, this.hashes), remote = await transport.scan(this.policy);
     validateManifestPaths(remote, this.policy);
     const plan = planSync(base, local, remote), expected: Manifest = { ...local };
     for (const path of plan.pull) { if (remote[path]) expected[path] = remote[path]!; else delete expected[path]; }
@@ -213,9 +226,10 @@ export class Synchronizer {
       const conflictDir = join(this.root, '.reroute', 'conflicts', randomUUID()); await privateDir(conflictDir);
       for (const path of plan.conflicts) {
         if (remote[path]) {
-          const files = await transport.read([path], this.policy); const data = Buffer.from(files[path]!, 'base64');
-          invariant(hash(data) === remote[path]!.hash, 'SYNC_RACE', 'Remote file changed during conflict capture');
-          await atomicWrite(join(conflictDir, 'remote', path), data);
+          const destination = await safePath(conflictDir, 'remote/' + path);
+          const temp = await stageDownload(transport, path, this.policy, destination, remote[path]);
+          try { await safePath(conflictDir, 'remote/' + path); await fs.rename(temp, destination); }
+          finally { await fs.rm(temp, { force: true }); }
         }
       }
       await writeJSON(join(conflictDir, 'conflicts.json'), { paths: plan.conflicts, base, local, remote });
@@ -224,17 +238,24 @@ export class Synchronizer {
     // Both sides finish planned deletions before any file/directory replacement writes.
     for (const deleting of [true, false]) {
       for (const path of plan.pull.filter(path => !remote[path] === deleting)) {
-        const data = remote[path] ? Buffer.from((await transport.read([path], this.policy))[path]!, 'base64') : undefined;
-        if (data) invariant(hash(data) === remote[path]!.hash, 'SYNC_RACE', 'Remote source changed while being read');
-        await applyLocal(this.root, path, local[path]?.hash ?? null, data, remote[path]?.mode ?? 0o644, this.policy);
+        const temp = remote[path] ? await stageDownload(transport, path, this.policy, await safePath(this.root, path), remote[path]) : undefined;
+        try { await applyLocal(this.root, path, local[path]?.hash ?? null, temp, remote[path]?.mode ?? 0o644, this.policy); }
+        finally { if (temp) await fs.rm(temp, { force: true }); }
       }
+      // Reuse guarded RPC batches; cap memory and keep each larger supported file alone.
+      let changes: FileChange[] = [], bytes = 0;
+      const flush = async () => { if (changes.length) { await transport.apply(changes, this.policy); changes = []; bytes = 0; } };
       for (const path of plan.push.filter(path => !local[path] === deleting)) {
         invariant(await currentHash(this.root, path) === (local[path]?.hash ?? null), 'SYNC_RACE', `Local source changed during transfer: ${path}`);
         const data = local[path] ? await fs.readFile(await safePath(this.root, path)) : undefined;
         if (data) invariant(hash(data) === local[path]!.hash, 'SYNC_RACE', `Local source changed during transfer: ${path}`);
         const change: FileChange = { path, expected: remote[path]?.hash ?? null, data: data ? data.toString('base64') : null, mode: local[path]?.mode };
-        await transport.apply([change], this.policy);
+        const size = Buffer.byteLength(JSON.stringify(change));
+        if (changes.length && (changes.length >= 128 || bytes + size > 4 * 1024 * 1024)) await flush();
+        changes.push(change); bytes += size;
+        if (changes.length >= 128 || bytes >= 4 * 1024 * 1024) await flush();
       }
+      await flush();
     }
     // Persist the agreed snapshot, not a fresh local scan that might include unsent edits.
     await writeJSON(baselinePath, expected);

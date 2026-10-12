@@ -46,7 +46,7 @@ provider features not mapped here are not claimed as implemented.
 
 ```sh
 ssh my-build-host 'python3 --version'
-reroute enable --provider ssh --host my-build-host
+reroute setup --provider ssh --host my-build-host
 reroute doctor --probe
 ```
 
@@ -54,12 +54,16 @@ Optional `user`, `port`, `remoteRoot`, `bootstrap` live in `[providers.ssh]`.
 Bootstrap is an explicit trusted remote command run for a new workspace, not an
 implicit package-manager installation. Default workspaces are under
 `~/.cache/reroute/workspaces/<uuid>` on the host. Destruction checks the directory
-basename and owner marker before removing that directory. Existing SSH machines
+configured root, basename, owner marker and recorded generation in one remote
+operation before removing that directory. Recorded workspaces are only verified,
+never reinitialized to repair missing ownership; exec/file operations also verify.
+Control preparation has a 60-second deadline; explicit SSH bootstrap has a ten-minute
+deadline and kills its transport on timeout/output overflow. Existing SSH machines
 are never powered off. Do not point a workspace at irreplaceable pre-existing data.
 
 ## SkyPilot
 
-Authenticate/check clouds through `sky check`, then `reroute enable --provider skypilot`.
+Authenticate/check clouds through `sky check`, then `reroute enable --provider skypilot --allow-paid`.
 Use `[providers.skypilot]` for `infra`, `instanceType`, `diskTier`, `remoteRoot`,
 `bootstrap`. Reroute writes a private JSON-as-YAML task and delegates provisioning
 to `sky launch`; it does not duplicate cloud scheduling. Standard streams run over
@@ -98,6 +102,19 @@ The native lifecycle uses `onTimeout: pause` (or kill when explicitly selected).
 Active leases refresh a bounded timeout, default one hour; plan-level limits still
 apply. `autoPause=false` destroys mutable state on idle. No invented generic CPU
 allocation parameter is sent to the template API.
+
+## Paid authorization
+
+Provider selection/setup and authentication discovery do not authorize charges.
+Daytona, SkyPilot, Modal and E2B core preparation requires explicit effective
+`authorization.paidProviders` (`reroute setup/enable --allow-paid` for the selected
+project/provider). The default/migrated grant is empty. Native budgets remain the
+source of cost controls; stopped compute can leave billable storage. Revocation
+is not stop/destroy. See [configuration](CONFIGURATION.md#paid-resource-authorization-and-authentication).
+
+Daytona validates local SSH host/port/custom API endpoint before SDK access or
+creation, and rejects malformed recorded generation before resuming compute.
+Short-lived SSH access expiry is bounded by the native response, not assumed.
 
 ## Verification and operational boundary
 

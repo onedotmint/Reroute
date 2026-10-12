@@ -35,8 +35,15 @@ export interface ExecutionHandle {
 export interface FileEntry { hash: string; size: number; mode: number }
 export type Manifest = Record<string, FileEntry>;
 export interface FileChange { path: string; expected: string | null; data: string | null; mode?: number }
-export interface SyncPolicy { excludes: string[]; maxFileBytes: number; maxFiles: number }
+export interface SyncPolicy { excludes: string[]; maxFileBytes: number; maxFiles: number; hashMode?: 'strict' | 'metadata' }
+export interface ArtifactPolicy { paths: string[]; maxFileBytes: number }
 export interface FileTransport {
+  /** Internal scan-cache scope; never proof of remote ownership. */
+  hashIdentity?: string;
+  /** Bounded chunks; resolves only after content metadata and transport completion. */
+  download?(path: string, policy: SyncPolicy, consume: (data: Buffer) => Promise<void>, artifact?: boolean): Promise<FileEntry>;
+  readArtifact?(path: string, maxFileBytes: number): Promise<FileEntry & { data: string }>;
+  invalidateHashes?(): void;
   scan(policy: SyncPolicy): Promise<Manifest>;
   read(paths: string[], policy: SyncPolicy): Promise<Record<string, string>>;
   apply(changes: FileChange[], policy: SyncPolicy): Promise<void>;
@@ -60,7 +67,9 @@ export interface ProjectConfig {
   runtime: RuntimeSpec;
   providers: Record<string, Record<string, unknown>>;
   sync: SyncPolicy;
-  routing: { commands: string[]; envAllow: string[] };
+  artifacts?: ArtifactPolicy;
+  authorization?: { paidProviders: ProviderId[] };
+  routing: { commands: string[]; envAllow: string[]; mode?: 'tasks'|'legacy'; tasks?: ('build'|'test'|'check'|'benchmark')[]; local?: string[][]; remote?: string[][] };
 }
 export interface ProjectState {
   version: 1; project: ProjectRef; enabled: boolean;

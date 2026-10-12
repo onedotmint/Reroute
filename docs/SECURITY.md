@@ -36,7 +36,13 @@ which cannot guarantee removal of arbitrarily transformed secrets.
 
 The remote supervisor and local synchronizer validate paths, reject symlinks,
 check content hashes before writes, preserve conflict copies and back up replaced
-local versions. They do not provide an atomic distributed filesystem transaction.
+local versions. Large returns, backups and conflict evidence are streamed; unverified
+content stays in private temporary files and is not installed as source. Strict scans
+remain the default. Explicit metadata hash reuse assumes ordinary Linux/ext4 change-time
+behavior; it is not a full-content integrity proof, and strict mode should be retained
+for privileged writers, snapshot restores and untrusted metadata. See
+[hash validation](CONFIGURATION.md#hash-validation-and-reuse).
+They do not provide an atomic distributed filesystem transaction.
 Another process editing a file in the tiny interval after its final comparison
 can still race a replacement. Backups help recovery; adversarial races and hostile
 remote manifests require a stronger sandbox/filesystem design.
@@ -57,6 +63,14 @@ bypass routing. Fail-closed applies to intercepted commands, not every imaginabl
 execution path available to an agent.
 
 ## Billing and lifecycle
+
+Paid preparation requires explicit effective `authorization.paidProviders` for the
+selected provider (`setup/enable --allow-paid`). Credentials, provider selection
+and legacy enabled state are not consent. `--revoke-paid` does not stop resources;
+an already-running original can still be safely reconciled/stopped, never replaced
+or resumed under that exception. See [configuration](CONFIGURATION.md#paid-resource-authorization-and-authentication).
+Status is local/coordinator metadata only: remote readiness is UNVERIFIED and
+billing UNKNOWN. No status query automatically starts the daemon or calls providers.
 
 Graceful idle/shutdown behavior is implemented; the latest release fixes passed
 local regression tests on 2026-10-11, not live cloud validation (see PROJECT-REVIEW).

@@ -133,16 +133,20 @@ for (const action of ['write', 'delete']) {
   test(`local ${action} rechecks user edits after preparing its backup/temp file`, async t => {
     const f = await setup(t, 'x'), saved = await fs.readFile(baseline(f), 'utf8');
     if (action === 'write') await put(f.remote, 'x', 'remote'); else await fs.unlink(join(f.remote, 'x'));
-    const write = fs.writeFile;
+    const open = fs.open;
     let edited = false;
-    fs.writeFile = async (path, ...args) => {
-      const result = await write(path, ...args);
+    fs.open = async (path, ...args) => {
+      const file = await open(path, ...args), write = file.write.bind(file);
       const trigger = action === 'write' ? dirname(String(path)) === f.local && String(path).startsWith(join(f.local, '.reroute-tmp-')) : String(path).includes('/.reroute/backups/');
-      if (!edited && trigger) { edited = true; await write(join(f.local, 'x'), 'user edit'); }
-      return result;
+      if (trigger) file.write = async (...args) => {
+        const result = await write(...args);
+        if (!edited) { edited = true; await fs.writeFile(join(f.local, 'x'), 'user edit'); }
+        return result;
+      };
+      return file;
     };
     try { await assert.rejects(f.sync.reconcile(f.files), error => error.code === 'SYNC_RACE'); }
-    finally { fs.writeFile = write; }
+    finally { fs.open = open; }
     assert.equal(edited, true);
     assert.equal(await fs.readFile(join(f.local, 'x'), 'utf8'), 'user edit');
     assert.equal(await fs.readFile(baseline(f), 'utf8'), saved);

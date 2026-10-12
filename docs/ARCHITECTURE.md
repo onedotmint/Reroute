@@ -32,8 +32,8 @@ errors, including an explicit `spot = false` on a provider that cannot map it.
 A structural SDK boundary is deliberately small, but has not replaced validation
 against real SDK declarations; that missing verification is documented.
 
-`src/core/routing.ts` is the only routing owner. Deterministic executable and
-subcommand groups separate runtime work from local identity/control work.
+`src/core/routing.ts` is the only routing owner. Deterministic argv task rules separate heavy candidates from lightweight,
+unknown and local identity/control work; explicit execution shares this safety core.
 Adapters activate this boundary, not a new remote model tool or an LLM classifier.
 `src/config/` exclusively owns config parsing, precedence and validation.
 
@@ -66,8 +66,9 @@ allows the last lease release to re-arm the configured idle deadline. Before exe
 or reconciliation, persistent `syncPending` state and a retained activity lease protect
 unreturned source. Failed reconciliation does not release that protective lease or
 arm destructive idle; successful sync clears the marker and releases it. Pending-source
-recovery uses the recorded running runtime, never `ensureReady` to replace it. A stopped
-original must be resumed through native provider tools before pending sync or destruction.
+recovery uses the recorded running runtime, never `ensureReady` to replace it. A stopped original can be restored only through a supported identity-preserving
+provider operation (Daytona), with paid authorization, or through native tools;
+never through replacement provisioning. Setup/config changes do not resume it.
 
 Graceful daemon shutdown cancels active processes and attempts pending reconciliation.
 After success it restores native idle, or immediately stops a backend such as Modal
@@ -108,9 +109,23 @@ protocol is claimed.
 
 `src/sync/sync.ts` computes a three-way plan from the last agreed manifest, current
 local source and current remote source. Transfers are incremental by content hash;
-scans still traverse/hash the source tree. `assets/worker.py` mirrors the exclusion
+scans still traverse the source tree. Strict scans hash content incrementally; optional
+in-process metadata reuse has a filesystem trust boundary, not a watcher-based guarantee
+(see [hash validation](CONFIGURATION.md#hash-validation-and-reuse)). `assets/worker.py` mirrors the exclusion
 policy, validates every path and enforces expected-content hashes on writes.
 The initial RPC payload is streamed over stdin to avoid OS argv size limits.
+Push operations use the existing worker's guarded batch support: up to 128 paths
+or roughly 4 MiB of JSON per batch; one larger supported file travels alone.
+Deletion batches precede writes. Baseline advancement remains all-success only.
+Return transfers and conflict evidence use 64 KiB chunks with one acknowledged
+chunk in flight; acknowledgement follows completed disk consumption. Incremental
+hash/size checks and transport confirmation precede installation from a private
+same-directory temporary. Local backups and expected-content checks also stream;
+unverified temporaries are removed on failure. Legacy injected transports retain
+their optional whole-file compatibility path, but all shipped providers use streaming.
+Push batching remains unchanged. Explicit artifact retrieval uses this same transport/
+project lane but cannot enter source reconciliation: exact build files go to a fresh
+private download directory.
 
 Local source writes are backed up; conflicts preserve remote copies and refuse
 silent replacement. Symlink traversal, suspicious path components, secret names,
@@ -130,7 +145,10 @@ expected hashes after backup/temp preparation. See LIMITATIONS.
 `~/.reroute/` holds only non-secret state, IPC token, owned shims/adapters, optional
 SDK installations, redacted metadata logs and project references. `.reroute/`
 inside a project holds its local identity, agreed sync manifest, conflict evidence
-and backup versions; `enable` adds it to `.gitignore`.
+backup versions and isolated explicit artifact downloads; `enable` adds it to `.gitignore`.
+Status reports local/coordinator observations without auto-start/provider calls;
+unknown remote readiness and billing remain explicitly unverified. Effective paid
+authorization is separate from auth presence and checked before core preparation.
 
 The IPC token is a short local authorization secret, not a provider credential.
 Provider credentials remain in provider-native stores/environment. Temporary

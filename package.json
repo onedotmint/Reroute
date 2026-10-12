@@ -17,10 +17,10 @@
   "exports": {
     ".": "./dist/core/contracts.js",
     "./pi": "./adapters/pi.mjs",
-    "./omp": "./adapters/omp.mjs",
     "./opencode": "./adapters/opencode.mjs",
     "./deepseek": "./adapters/deepseek.mjs"
   },
+  "pi": { "extensions": ["./adapters/pi.ts"] },
   "files": [
     "bin",
     "dist",
@@ -47,5 +47,9 @@
     "smoke": "node bin/reroute.mjs --help",
     "package:source": "node scripts/package.mjs"
   },
-  "packageManager": "pnpm@10.11.0"
+  "packageManager": "pnpm@10.11.0",
+  "bundleDependencies": ["@clack/prompts"],
+  "dependencies": {
+    "@clack/prompts": "1.8.1"
+  }
 }

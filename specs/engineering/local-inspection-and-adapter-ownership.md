@@ -52,6 +52,10 @@ unrelated hooks/settings, backups and runtime/source state. Doctor must not turn
 mere discovery into installation or silently restore a deliberately uninstalled
 adapter. Legacy installations without exact ownership are conservatively preserved.
 
+Removed OMP support retains registry compatibility for explicit safe cleanup only;
+never reinstall it or select it in default uninstall. See the
+[legacy OMP migration boundary](../../docs/HARNESSES.md#legacy-omp-migration-no-longer-supported).
+
 Uninstalling an adapter is not disabling a project, destroying a runtime, purging
 credentials/SDKs, restoring an entire config backup or proving zero cloud charges.
 See [harness boundaries](../../docs/HARNESSES.md) and

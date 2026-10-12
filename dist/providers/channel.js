@@ -1,40 +1,57 @@
 import { readFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { AsyncQueue } from '../core/queue.js';
 import { RerouteError, invariant } from '../core/errors.js';
-import { packageRoot } from '../platform/files.js';
+import { packageRoot, safeRelative } from '../platform/files.js';
+import { excluded, validSyncPattern } from '../sync/sync.js';
+import { validArtifactPath } from '../sync/artifacts.js';
 let source;
 export function workerArgv(payload) {
     source ??= readFileSync(join(packageRoot, 'assets', 'worker.py'), 'utf8');
     return ['python3', '-u', '-c', source, Buffer.from(JSON.stringify(payload)).toString('base64')];
 }
-async function channel(launch, runtime, payload) {
+async function channel(launch, runtime, payload, receive) {
     const streamingRequest = payload.op === 'rpc';
-    const raw = await launch(runtime, workerArgv(streamingRequest ? { op: 'rpc_stream', root: runtime.root } : { ...payload, root: runtime.root }));
+    const raw = await launch(runtime, workerArgv(streamingRequest || receive ? { op: receive ? 'file_stream' : 'rpc_stream', root: runtime.root } : { ...payload, root: runtime.root }));
     const queue = new AsyncQueue();
     const stdinAck = new AsyncQueue(8);
     let readyResolve, readyReject;
     const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
     void ready.catch(() => { });
     let gotResult = false, result, heartbeat;
-    const startedTimer = setTimeout(() => { void raw.kill(); }, 30000);
+    let timeoutReject;
+    const idleFailure = new Promise((_, reject) => { timeoutReject = reject; });
+    void idleFailure.catch(() => { });
+    let startedTimer;
+    const armTimer = () => {
+        clearTimeout(startedTimer);
+        startedTimer = setTimeout(() => {
+            if (receive)
+                timeoutReject(new RerouteError('TRANSPORT_TIMEOUT', 'Remote file stream made no progress for 30 seconds'));
+            void raw.kill().catch(() => { });
+        }, 30000);
+    };
+    armTimer();
     const send = (frame) => raw.write(Buffer.from(JSON.stringify(frame) + '\n'));
     if (payload.op === 'exec')
         heartbeat = setInterval(() => { void send({ type: 'ping' }).catch(() => { void raw.kill(); }); }, 10000);
     const done = (async () => {
-        let line = '';
-        const decoder = new StringDecoder('utf8');
-        try {
+        const read = (async () => {
+            let line = '';
+            const decoder = new StringDecoder('utf8');
             for await (const event of raw.events) {
                 if (event.stream === 'stderr')
                     continue; // Native errors can contain auth URLs: never leak them.
                 line += decoder.write(event.data);
-                invariant(line.length <= 64 * 1024 * 1024, 'PROTOCOL_LIMIT', 'Remote protocol frame exceeded its limit');
+                invariant((receive ? Buffer.byteLength(line) <= 256 * 1024 : line.length <= 64 * 1024 * 1024), 'PROTOCOL_LIMIT', 'Remote protocol frame exceeded its limit');
                 let boundary;
                 while ((boundary = line.indexOf('\n')) >= 0) {
                     const text = line.slice(0, boundary);
                     line = line.slice(boundary + 1);
+                    if (receive)
+                        invariant(Buffer.byteLength(text) <= 112 * 1024, 'PROTOCOL_LIMIT', 'Remote file frame exceeded its limit');
                     let packet;
                     try {
                         packet = JSON.parse(text);
@@ -43,7 +60,20 @@ async function channel(launch, runtime, payload) {
                         throw new RerouteError('REMOTE_PROTOCOL', 'Unexpected remote output. Disable login banners and verify Python 3 on the runtime.');
                     }
                     invariant(packet && typeof packet.type === 'string', 'REMOTE_PROTOCOL', 'Malformed remote packet');
-                    if (packet.type === 'started') {
+                    if (receive) {
+                        invariant(!gotResult, 'REMOTE_PROTOCOL', 'Unexpected packet after file stream confirmation');
+                        if (packet.type === 'error')
+                            throw new RerouteError('REMOTE_WORKER', `Remote workspace operation failed: ${String(packet.message).slice(0, 240)}`, 74);
+                        armTimer();
+                        const value = await Promise.race([receive(packet, raw), idleFailure]);
+                        if (value !== undefined) {
+                            gotResult = true;
+                            result = value;
+                            readyResolve();
+                        }
+                        armTimer();
+                    }
+                    else if (packet.type === 'started') {
                         clearTimeout(startedTimer);
                         readyResolve();
                     }
@@ -69,11 +99,18 @@ async function channel(launch, runtime, payload) {
                     else
                         throw new RerouteError('REMOTE_PROTOCOL', 'Unknown remote protocol packet');
                 }
+                if (receive)
+                    invariant(Buffer.byteLength(line) <= 112 * 1024, 'PROTOCOL_LIMIT', 'Remote file frame exceeded its limit');
             }
+            if (receive)
+                invariant(line === '' && decoder.end() === '', 'REMOTE_PROTOCOL', 'Truncated file stream frame');
             const transportCode = await raw.wait();
             invariant(gotResult && transportCode === 0, 'TRANSPORT_LOST', 'Remote transport ended without a confirmed result. No local fallback was used.');
             queue.end();
             return result;
+        })();
+        try {
+            return await (receive ? Promise.race([read, idleFailure]) : read);
         }
         catch (error) {
             readyReject(error);
@@ -88,12 +125,17 @@ async function channel(launch, runtime, payload) {
         }
     })();
     void done.catch(() => { });
-    if (streamingRequest) {
+    if (streamingRequest || receive) {
         try {
             const data = Buffer.from(JSON.stringify(payload) + '\n');
-            for (let i = 0; i < data.length; i += 32768)
-                await raw.write(data.subarray(i, i + 32768));
-            await raw.closeInput();
+            if (receive)
+                invariant(data.length <= 100 * 1024, 'PROTOCOL_LIMIT', 'File stream request exceeded its limit');
+            for (let i = 0; i < data.length; i += 32768) {
+                const write = raw.write(data.subarray(i, i + 32768));
+                await (receive ? Promise.race([write, idleFailure]) : write);
+            }
+            if (!receive)
+                await raw.closeInput();
         }
         catch (error) {
             await raw.kill().catch(() => { });
@@ -159,9 +201,90 @@ function manifest(value, policy) {
     }
     return value;
 }
+// Weak identity scope survives recreated transports, not process exits or runtime replacement.
+const scanCaches = new WeakMap();
 export function fileTransport(launch, runtime) {
+    const identity = () => JSON.stringify([runtime.provider, runtime.id, runtime.projectId, runtime.root, runtime.meta.workspaceGeneration]);
     return {
-        scan: async (policy) => manifest(await rpc(launch, runtime, { action: 'scan', policy }), policy),
+        get hashIdentity() { return identity(); },
+        invalidateHashes: () => { scanCaches.delete(runtime); },
+        download: async (path, policy, consume, artifact = false) => {
+            safeRelative(path);
+            invariant(Buffer.byteLength(path) <= 4096 && typeof artifact === 'boolean', 'UNSAFE_PATH', 'Invalid file stream path');
+            invariant(Array.isArray(policy.excludes) && policy.excludes.every(validSyncPattern) && Number.isSafeInteger(policy.maxFiles) && policy.maxFiles > 0 && Number.isSafeInteger(policy.maxFileBytes) && policy.maxFileBytes > 0, 'CONFIG', 'Invalid file stream policy');
+            invariant(artifact ? validArtifactPath(path) && policy.maxFileBytes <= 32 * 1024 * 1024 && !excluded(path.split('/').slice(1).join('/'), policy) : !excluded(path, policy), 'UNSAFE_PATH', 'Excluded file stream path or invalid artifact limit');
+            let state = 'start';
+            let sequence = 0, bytes = 0, size = 0, mode = 0;
+            const hash = createHash('sha256');
+            let entry;
+            const c = await channel(launch, runtime, { op: 'file_stream', action: 'read_stream', path, policy, artifact }, async (packet, raw) => {
+                invariant(packet.path === path, 'REMOTE_PROTOCOL', 'File stream path mismatch');
+                const fields = (...keys) => invariant(Object.keys(packet).length === keys.length && keys.every(key => Object.hasOwn(packet, key)), 'REMOTE_PROTOCOL', 'Malformed file stream frame');
+                if (state === 'start' && packet.type === 'file_start') {
+                    fields('type', 'path', 'size', 'mode');
+                    invariant(Number.isSafeInteger(packet.size) && Number(packet.size) >= 0 && Number(packet.size) <= policy.maxFileBytes && Number.isInteger(packet.mode) && Number(packet.mode) >= 0 && Number(packet.mode) <= 0o777, 'REMOTE_PROTOCOL', 'Invalid file stream metadata');
+                    size = Number(packet.size);
+                    mode = Number(packet.mode);
+                    state = 'chunks';
+                }
+                else if (state === 'chunks' && packet.type === 'file_chunk') {
+                    fields('type', 'path', 'seq', 'data');
+                    invariant(packet.seq === sequence && typeof packet.data === 'string' && packet.data.length > 0 && packet.data.length <= 87384, 'REMOTE_PROTOCOL', 'Invalid file stream chunk');
+                    const data = Buffer.from(packet.data, 'base64');
+                    invariant(data.length === Math.min(65536, size - bytes) && data.length > 0 && data.toString('base64') === packet.data, 'REMOTE_PROTOCOL', 'Noncanonical or oversized file stream chunk');
+                    bytes += data.length;
+                    hash.update(data);
+                    await consume(data);
+                    await raw.write(Buffer.from(JSON.stringify({ type: 'file_ack', path, seq: sequence++ }) + '\n'));
+                }
+                else if (state === 'chunks' && packet.type === 'file_end') {
+                    fields('type', 'path', 'seq', 'hash', 'size', 'mode');
+                    invariant(packet.seq === sequence && bytes === size && packet.size === size && packet.mode === mode && typeof packet.hash === 'string' && /^[a-f0-9]{64}$/.test(packet.hash) && packet.hash === hash.digest('hex'), 'REMOTE_PROTOCOL', 'Unverified file stream end');
+                    entry = { hash: packet.hash, size, mode };
+                    state = 'result';
+                }
+                else if (state === 'result' && packet.type === 'file_result') {
+                    fields('type', 'path', 'ok');
+                    invariant(packet.ok === true, 'REMOTE_PROTOCOL', 'File stream was not confirmed');
+                    state = 'done';
+                    return entry;
+                }
+                else
+                    throw new RerouteError('REMOTE_PROTOCOL', 'Unexpected file stream frame order');
+                return undefined;
+            });
+            return c.done;
+        },
+        readArtifact: async (path, maxFileBytes) => {
+            invariant(validArtifactPath(path) && Number.isSafeInteger(maxFileBytes) && maxFileBytes > 0 && maxFileBytes <= 32 * 1024 * 1024, 'ARTIFACT_PATH', 'Invalid artifact path or limit');
+            const policy = { excludes: [], maxFiles: 1, maxFileBytes };
+            const result = await rpc(launch, runtime, { action: 'artifact', path, policy });
+            manifest({ [path]: result }, policy);
+            invariant(result && typeof result.data === 'string', 'REMOTE_PROTOCOL', 'Invalid artifact response');
+            return result;
+        },
+        scan: async (policy) => {
+            if (policy.hashMode !== 'metadata') {
+                scanCaches.delete(runtime);
+                return manifest(await rpc(launch, runtime, { action: 'scan', policy }), policy);
+            }
+            const binding = identity();
+            let cache = scanCaches.get(runtime);
+            if (!cache || cache.binding !== binding)
+                cache = { binding, key: randomBytes(32).toString('hex'), files: {} };
+            try {
+                const result = await rpc(launch, runtime, { action: 'scan_cached', policy, cache: { key: cache.key, files: cache.files } });
+                const files = manifest(result?.manifest, policy);
+                invariant(result.cache && typeof result.cache === 'object' && !Array.isArray(result.cache) && Object.keys(result.cache).length <= policy.maxFiles, 'REMOTE_PROTOCOL', 'Invalid scan cache response');
+                cache.files = result.cache;
+                scanCaches.set(runtime, cache);
+                return files;
+            }
+            catch (error) {
+                scanCaches.delete(runtime);
+                throw error;
+            }
+        },
         read: async (paths, policy) => {
             const result = await rpc(launch, runtime, { action: 'read', paths, policy });
             invariant(result && typeof result === 'object' && !Array.isArray(result), 'REMOTE_PROTOCOL', 'Invalid file response');

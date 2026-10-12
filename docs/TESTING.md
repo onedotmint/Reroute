@@ -2,7 +2,7 @@
 
 ## Local suites
 
-After `npm run tools:install`, `npm run verify:release` checks committed `dist/`
+After `npm ci --ignore-scripts` and `npm run tools:install`, `npm run verify:release` checks committed `dist/`
 against a temporary build **before rebuilding**, checks core and real pinned Daytona
 SDK declarations, builds, runs every non-live suite, CLI smoke and offline tarball
 installation in an isolated HOME/prefix. After source edits, build before this gate.
@@ -24,8 +24,9 @@ missing tooling fails instead of silently skipping release tests. No cloud auth 
   test transport; setup discovers a fixture Pi directory; enable, shell composition,
   remote-directory execution, local Git, persistent remote cache, streams/exit,
   explicit local override, auth rejection, client crash and open-stdin exit.
-- Harness fixtures: Pi/OMP/Claude/Codex/Cursor/OpenCode/DeepSeek protocols and safe,
-  idempotent installation/merging. Native host products are not launched.
+- Harness fixtures: Pi/Claude/Codex/Cursor/OpenCode/DeepSeek protocols and safe,
+  idempotent installation/merging; legacy OMP ownership-checked cleanup only.
+  Native host products are not launched.
 
 The injectable test transport executes in a **separate local directory on the same
 machine**, not a remote cloud host. Fake SDK/native-CLI records test our wire
@@ -145,3 +146,20 @@ tree and `DELIVERY-STATE.json` inside the archive.
 
 Node 22 MockTimers currently emits an experimental API warning; that is not a skipped
 assertion. GitHub matrix results must be reported separately from local Node checks.
+
+## Workflow/core 0.2 refactor coverage
+
+New local fixtures cover conservative tasks/exact project prefixes and legacy
+migration (`unit/task-routing`), cold config rejection and paid-provider consent
+(`integration/paid-consent`), real PTY setup/noninteractive CLI/read-only status,
+explicit versus transparent shared execution, isolated artifacts, bounded push
+batches/partial failures, original SSH owner/generation faults and shared five-provider
+transport verification. Control capture has deadline/output-overflow cleanup checks.
+The existing race/conflict/delete/stdin/cancel/lifecycle/adapter-ownership suites
+remain gates, not replaced with happy-path benchmark assertions.
+
+See [REFACTOR-0.2](REFACTOR-0.2.md) for the actual final gate counts and
+[BENCHMARK](BENCHMARK.md) for measured CPU/RSS/logical-read/block-I/O boundaries.
+The live suite was forced off for this refactor; skipped cases are UNVERIFIED,
+not successful cloud or native Pi acceptance. A native PTY setup fixture is not
+an installed Pi product test.

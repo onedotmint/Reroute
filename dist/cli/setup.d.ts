@@ -1,5 +1,6 @@
-export declare const HARNESSES: readonly ["pi", "omp", "claude", "codex", "deepseek", "opencode", "cursor"];
+export declare const HARNESSES: readonly ["pi", "claude", "codex", "deepseek", "opencode", "cursor"];
 export type Harness = typeof HARNESSES[number];
+export type UninstallHarness = Harness | 'omp';
 export declare const SDKS: Record<string, string>;
 export declare function agentHome(): string;
 export declare function binary(name: string): Promise<string | undefined>;
@@ -8,12 +9,12 @@ export declare function detectHarnesses(): Promise<Harness[]>;
 export declare function mergeHookFile(path: string, host: 'claude' | 'codex' | 'cursor'): Promise<void>;
 export declare function installHarness(id: Harness): Promise<string>;
 export interface UninstallOptions {
-    harnesses?: Harness[];
+    harnesses?: UninstallHarness[];
 }
 export interface UninstallResult {
     removed: string[];
     preserved: {
-        harness: Harness;
+        harness: UninstallHarness;
         path: string;
         reason: string;
     }[];

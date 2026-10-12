@@ -39,11 +39,21 @@ test('graceful coordinator shutdown terminates Modal instead of abandoning its i
   process.env.REROUTE_HOME = join(f.directory, 'home');
   const { provider, records } = await providerFixture('modal', f, t), core = new Coordinator(() => provider);
   t.after(async () => { await core.shutdown(); if (oldHome === undefined) delete process.env.REROUTE_HOME; else process.env.REROUTE_HOME = oldHome; });
-  await core.enable(f.local, 'modal', {});
+  await core.enable(f.local, 'modal', { authorization: { paidProviders: ['modal'] } });
   const state = await core.start(f.local);
   assert.equal(provider.capabilities.nativeIdle, false);
   assert.equal(records.created[0].timeoutMs, 86400000);
   await core.shutdown();
   assert.equal(records.deleted, 1);
   assert.equal(await provider.status(state.runtime), 'stopped');
+});
+
+for(const id of ['daytona','ssh','skypilot','modal','e2b']) test(id+' shared transport rejects a replaced owner generation before source reads',async t=>{
+  const f=await fixture(t),{provider}=await providerFixture(id,f,t);
+  const runtime=await provider.ensureReady(f.project,{idleTimeoutMinutes:1,env:{}});
+  const marker=join(runtime.root,'.reroute-runtime/owner.json');
+  const changed={projectId:f.project.id,generation:'22222222-2222-4222-8222-222222222222'};
+  await fs.writeFile(marker,JSON.stringify(changed));
+  await assert.rejects(provider.files(runtime).scan(policy),error=>error.code==='WORKSPACE_IDENTITY');
+  assert.deepEqual(JSON.parse(await fs.readFile(marker,'utf8')),changed);
 });

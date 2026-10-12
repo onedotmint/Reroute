@@ -8,7 +8,7 @@ import { createProvider } from '../providers/index.js';
 import { RerouteError, invariant, safeMessage, errorCode } from '../core/errors.js';
 import { home, privateDir, atomicWrite, writeJSON } from '../platform/files.js';
 import { isSecretName, isControlEnv } from '../core/routing.js';
-import { PROVIDERS, loadConfig } from '../config/config.js';
+import { PROVIDERS } from '../config/config.js';
 import { endpoint, send, lines } from './protocol.js';
 import { log } from '../core/logging.js';
 function runInput(p) {
@@ -18,7 +18,9 @@ function runInput(p) {
         invariant(/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !isSecretName(key) && !isControlEnv(key) && typeof value === 'string', 'IPC_PROTOCOL', 'Unsafe environment forwarding');
     if (p.timeoutMs !== undefined)
         invariant(typeof p.timeoutMs === 'number' && Number.isFinite(p.timeoutMs) && p.timeoutMs > 0, 'IPC_PROTOCOL', 'Invalid execution timeout');
-    return { cwd: p.cwd, argv: p.argv, env: p.env, timeoutMs: p.timeoutMs };
+    if (p.explicit !== undefined)
+        invariant(typeof p.explicit === 'boolean', 'IPC_PROTOCOL', 'Invalid routing override');
+    return { cwd: p.cwd, argv: p.argv, env: p.env, timeoutMs: p.timeoutMs, explicit: p.explicit };
 }
 export async function serve(coordinator = new Coordinator(createProvider)) {
     await privateDir(home());
@@ -102,7 +104,6 @@ export async function serve(coordinator = new Coordinator(createProvider)) {
                     case 'enable': {
                         invariant(PROVIDERS.includes(packet.provider), 'CONFIG', 'Invalid provider');
                         const override = packet.override && typeof packet.override === 'object' ? packet.override : {};
-                        await loadConfig(cwd, { ...override, provider: packet.provider });
                         value = await coordinator.enable(cwd, packet.provider, override, packet.fresh === true);
                         break;
                     }
@@ -117,6 +118,9 @@ export async function serve(coordinator = new Coordinator(createProvider)) {
                         break;
                     case 'status':
                         value = await coordinator.status(cwd);
+                        break;
+                    case 'artifacts':
+                        value = await coordinator.artifacts(cwd);
                         break;
                     case 'sync':
                         value = await coordinator.synchronize(cwd, packet.acceptLocal === true);

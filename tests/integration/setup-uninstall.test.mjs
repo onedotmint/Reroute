@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -54,13 +55,14 @@ test('default setup discovers harnesses without installing; explicit setup survi
   const explicit = await setup({ harnesses: ['pi'] }); assert.deepEqual(Object.keys(explicit.installed), ['pi']);
   await setup({});
   assert.deepEqual(Object.keys((await json(join(f.state, 'setup.json'))).installed), ['pi']);
-  const skipped = await setup({ harnesses: ['omp'], skipAdapters: true }); assert.deepEqual(skipped.installed, {}); await absent(f.paths.omp);
+  assert.equal(HARNESSES.includes('omp'), false); await absent(f.paths.omp);
+  const skipped = await setup({ harnesses: ['pi'], skipAdapters: true }); assert.deepEqual(skipped.installed, {});
   const declined = await setup({ harnesses: ['codex'] }); assert.deepEqual(declined.installed, {}); assert.equal(declined.warnings.length, 1); await absent(f.paths.codex);
   assert.deepEqual(Object.keys((await setup({ harnesses: ['codex'], allowCodexHook: true })).installed), ['codex']);
 });
 
 test('uninstall removes only unchanged owned extensions/plugins and is idempotent', async t => {
-  const f = await context(t), ids = ['pi', 'omp', 'opencode', 'deepseek'];
+  const f = await context(t), ids = ['pi', 'opencode', 'deepseek'];
   for (const id of ids) { await installHarness(id); await installHarness(id); }
   const foreign = join(dirname(f.paths.pi), 'other.ts'); await fs.writeFile(foreign, 'user extension');
   await write(join(f.state, 'config.json'), { user: 'keep' }); await write(join(f.state, 'projects/keep.json'), { runtime: 'untouched' });
@@ -73,16 +75,16 @@ test('uninstall removes only unchanged owned extensions/plugins and is idempoten
 });
 
 test('selective uninstall preserves edits even with the managed marker, and never recreates removed adapters', async t => {
-  const f = await context(t); await setup({ harnesses: ['pi', 'omp'] });
+  const f = await context(t); await setup({ harnesses: ['pi', 'opencode'] });
   await fs.appendFile(f.paths.pi, '// user edit\n'); const edited = await read(f.paths.pi);
   const report = await uninstall({ harnesses: ['pi'] }); assert.deepEqual(report.removed, []); assert.equal(report.preserved[0].reason, 'MODIFIED');
-  assert.equal(await read(f.paths.pi), edited); assert.ok(await read(f.paths.omp));
+  assert.equal(await read(f.paths.pi), edited); assert.ok(await read(f.paths.opencode));
   await assert.rejects(installHarness('pi'), /unowned or modified/); assert.equal(await read(f.paths.pi), edited);
-  await uninstall({ harnesses: ['omp'] }); await absent(f.paths.omp);
+  await uninstall({ harnesses: ['opencode'] }); await absent(f.paths.opencode);
   const checks = (await doctor(f.home, true, false)).checks;
   assert.equal(checks.find(item => item.check === 'harness pi').state, 'MODIFIED');
-  assert.equal(checks.find(item => item.check === 'harness omp').state, 'NOT INSTALLED');
-  assert.equal(await read(f.paths.pi), edited); await absent(f.paths.omp);
+  assert.equal(checks.find(item => item.check === 'harness opencode').state, 'NOT INSTALLED');
+  assert.equal(await read(f.paths.pi), edited); await absent(f.paths.opencode);
   assert.deepEqual(Object.keys((await json(join(f.state, 'setup.json'))).installed), ['pi']);
   await assert.rejects(uninstall({ harnesses: ['unknown'] }), /Unknown harness/);
 });
@@ -127,7 +129,7 @@ test('doctor reports explicit ownership, fixes missing owned files, and does not
   assert.equal(before.find(item => item.check === 'harness pi').state, 'MISSING');
   const after = (await doctor(f.home, true, false)).checks;
   assert.equal(after.find(item => item.check === 'harness pi').state, 'INSTALLED');
-  assert.equal(after.find(item => item.check === 'harness omp').state, 'NOT INSTALLED');
+  assert.equal(after.some(item => item.check === 'harness omp'), false);
   assert.equal(await read(f.paths.pi), original); await absent(f.paths.omp);
   await fs.unlink(f.paths.pi); assert.deepEqual((await uninstall()).removed, []);
   await doctor(f.home, true, false); await absent(f.paths.pi);
@@ -180,3 +182,82 @@ test('symlinks and registry paths outside the current homes cannot authorize del
   assert.equal((await uninstall()).preserved[0].reason, 'UNSAFE'); assert.equal(await read(target), contents);
   await fs.unlink(f.registry); await fs.symlink(target, f.registry); await assert.rejects(uninstall(), /symlink/); assert.equal(await read(target), contents);
 });
+
+async function legacyOMP(f) {
+  const content = '// Managed by Reroute\nexport { default } from "file:///old-reroute/adapters/omp.mjs";\n';
+  await fs.mkdir(dirname(f.paths.omp), { recursive: true }); await fs.writeFile(f.paths.omp, content);
+  const registry = await json(f.registry).catch(error => { if (error.code === 'ENOENT') return { commands: [], entries: [] }; throw error; });
+  registry.entries.push({ harness: 'omp', path: f.paths.omp, kind: 'file', hash: createHash('sha256').update(content).digest('hex') });
+  await write(f.registry, registry);
+  await write(join(f.state, 'setup.json'), { installed: { omp: f.paths.omp } });
+  return content;
+}
+
+test('OMP cannot be installed, even by JS callers or with skipAdapters', async t => {
+  const f = await context(t);
+  await assert.rejects(installHarness('omp'), /OMP is uninstall-only/);
+  for (const skipAdapters of [false, true]) await assert.rejects(setup({ harnesses: ['omp'], skipAdapters }), /OMP is uninstall-only/);
+  await absent(f.paths.omp); await absent(f.registry); await absent(join(f.state, 'setup.json'));
+});
+
+test('legacy OMP registry stays compatible but cleanup requires explicit selection and exact ownership', async t => {
+  const f = await context(t), content = await legacyOMP(f);
+  await installHarness('pi');
+  const settings = join(f.home, '.omp/agent/settings.json'), foreign = join(dirname(f.paths.omp), 'other.ts');
+  await write(settings, { theme: 'keep', extensions: ['reroute.ts'] }); await fs.writeFile(foreign, 'user extension');
+  const originalSettings = await read(settings);
+  const checks = (await doctor(f.home, true, false)).checks;
+  assert.equal(checks.find(item => item.check === 'harness omp').state, 'LEGACY');
+  assert.equal(await read(f.paths.omp), content);
+  await uninstall(); await absent(f.paths.pi); assert.equal(await read(f.paths.omp), content);
+  const result = await uninstall({ harnesses: ['omp'] });
+  assert.deepEqual(result.removed, [f.paths.omp]); assert.deepEqual(result.preserved, []); await absent(f.paths.omp);
+  assert.equal(await read(settings), originalSettings); assert.equal(await read(foreign), 'user extension');
+  assert.deepEqual((await json(f.registry)).entries, []); assert.deepEqual((await json(join(f.state, 'setup.json'))).installed, {});
+  assert.deepEqual((await uninstall({ harnesses: ['omp'] })).removed, []);
+  await doctor(f.home, true, false); await absent(f.paths.omp);
+});
+
+test('doctor warns on missing legacy OMP without reinstalling it; explicit cleanup drops only stale ownership', async t => {
+  const f = await context(t); await legacyOMP(f); await fs.unlink(f.paths.omp);
+  const checks = (await doctor(f.home, true, false)).checks;
+  const legacy = checks.find(item => item.check === 'harness omp');
+  assert.equal(legacy.state, 'LEGACY'); assert.deepEqual(legacy.detail.states, ['MISSING']); await absent(f.paths.omp);
+  const result = await uninstall({ harnesses: ['omp'] }); assert.deepEqual(result.removed, []); assert.deepEqual(result.preserved, []);
+  assert.deepEqual((await json(f.registry)).entries, []); await absent(f.paths.omp);
+});
+
+test('unrecorded legacy OMP is warned about, not claimed, reinstalled or removed', async t => {
+  const f = await context(t); const content = await legacyOMP(f); await fs.unlink(f.registry);
+  const checks = (await doctor(f.home, true, false)).checks;
+  const legacy = checks.find(item => item.check === 'harness omp');
+  assert.equal(legacy.state, 'LEGACY'); assert.deepEqual(legacy.detail.states, []); assert.match(legacy.detail.note, /unrecorded/);
+  assert.deepEqual((await uninstall({ harnesses: ['omp'] })).removed, []); assert.equal(await read(f.paths.omp), content);
+  assert.deepEqual((await json(join(f.state, 'setup.json'))).installed, { omp: f.paths.omp });
+});
+
+for (const change of ['modified', 'symlink', 'parent symlink', 'outside path', 'wrong kind']) {
+  test(`legacy OMP ${change} is preserved by doctor fix and explicit uninstall`, async t => {
+    const f = await context(t), content = await legacyOMP(f), outside = join(f.root, 'outside.ts');
+    await fs.writeFile(outside, content);
+    if (change === 'modified') await fs.appendFile(f.paths.omp, '// user edit\n');
+    if (change === 'symlink') { await fs.unlink(f.paths.omp); await fs.symlink(outside, f.paths.omp); }
+    if (change === 'parent symlink') {
+      await fs.unlink(f.paths.omp); await fs.rmdir(dirname(f.paths.omp));
+      const folder = join(f.root, 'outside-dir'); await fs.mkdir(folder); await fs.writeFile(join(folder, 'reroute.ts'), content);
+      await fs.symlink(folder, dirname(f.paths.omp));
+    }
+    if (change === 'outside path' || change === 'wrong kind') {
+      const registry = await json(f.registry);
+      if (change === 'outside path') registry.entries[0].path = outside;
+      else registry.entries[0] = { harness: 'omp', path: f.paths.omp, kind: 'hook', event: 'PreToolUse', entry: {} };
+      await write(f.registry, registry);
+    }
+    const original = await read(f.paths.omp), registry = await read(f.registry), metadata = await read(join(f.state, 'setup.json'));
+    assert.equal((await doctor(f.home, true, false)).checks.find(item => item.check === 'harness omp').state, 'LEGACY');
+    const result = await uninstall({ harnesses: ['omp'] }); assert.deepEqual(result.removed, []);
+    assert.equal(result.preserved[0].reason, change === 'modified' ? 'MODIFIED' : 'UNSAFE');
+    assert.equal(await read(f.paths.omp), original); assert.equal(await read(outside), content);
+    assert.equal(await read(f.registry), registry); assert.equal(await read(join(f.state, 'setup.json')), metadata);
+  });
+}

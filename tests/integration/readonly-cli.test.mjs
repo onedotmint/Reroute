@@ -25,12 +25,12 @@ async function context(t, enabled = true) {
 }
 
 for (const [argv, expected, rule] of [
-  [['pnpm', 'test'], 'remote', 'configured-runtime-command'],
+  [['pnpm', 'test'], 'remote', 'heavy-task-candidate'],
   [['git', 'status'], 'local', 'control-command'],
   [['npm', 'publish'], 'local', 'identity-subcommand'],
   [['pnpm', 'config', 'set'], 'local', 'identity-subcommand'],
-  [['bash', '-c', 'pnpm test'], 'local', 'not-configured-runtime-command'],
-  [['env', 'pnpm', 'test'], 'local', 'not-configured-runtime-command']
+  [['bash', '-c', 'pnpm test'], 'local', 'control-command'],
+  [['env', 'pnpm', 'test'], 'local', 'control-command']
 ]) test('read-only explain: ' + argv.join(' '), async t => {
   const f = await context(t), result = await f.run('explain', '--json', '--', ...argv);
   assert.equal(result.code, 0, result.stderr);
@@ -45,13 +45,13 @@ for (const [argv, expected, rule] of [
 test('explain does not spawn even a configured executable or start a daemon', async t => {
   const f = await context(t);
   const result = await f.run('explain', '--json', '--', 'python3', '-c', "open('MUST_NOT_EXIST','w').write('bad')");
-  assert.equal(result.code, 0, result.stderr); assert.equal(JSON.parse(result.stdout).route, 'remote');
+  assert.equal(result.code, 0, result.stderr); assert.equal(JSON.parse(result.stdout).route, 'local');
   await assert.rejects(fs.stat(join(f.local, 'MUST_NOT_EXIST')), { code: 'ENOENT' });
   await f.unchanged();
 });
 
 test('absolute executables distinguish routing policy from interception bypass', async t => {
-  const f = await context(t), result = await f.run('explain', '--json', '--', '/usr/bin/python3', '-c', 'pass');
+  const f = await context(t), result = await f.run('explain', '--json', '--', '/usr/bin/cargo', 'test');
   const report = JSON.parse(result.stdout);
   assert.equal(report.policyRoute, 'remote'); assert.equal(report.intercepted, false); assert.equal(report.route, 'local');
   assert.equal(report.reason, 'not-intercepted-by-path-shim'); await f.unchanged();
@@ -122,4 +122,27 @@ for (const args of [['uninstall'], ['uninstall', '--harness', 'pi']]) test('CLI 
   const f = await context(t), result = await f.run(...args);
   assert.equal(result.code, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout).removed, []);
   await f.unchanged();
+});
+
+test('default status is readable; JSON status never starts an absent daemon or modifies state', async t => {
+  const f = await context(t);
+  const readable = await f.run(); assert.equal(readable.code, 0, readable.stderr);
+  assert.match(readable.stdout, /Project:.*enabled/); assert.match(readable.stdout, /billing: UNKNOWN/);
+  const machine = await f.run('status', '--json'), report = JSON.parse(machine.stdout);
+  assert.equal(report.coordinator, 'not running'); assert.equal(report.remoteReadiness, 'UNVERIFIED');
+  assert.equal(report.active, undefined); await f.unchanged();
+});
+
+test('noninteractive default setup never waits or enables a project implicitly', async t => {
+  const f = await fixture(t), stateHome = join(f.directory, 'home'), agents = join(f.directory, 'agents');
+  const result = await capture(process.execPath, [cli, 'setup'], { cwd: f.local, env: { ...process.env, REROUTE_HOME: stateHome, REROUTE_AGENT_HOME: agents }, timeoutMs: 10000 });
+  assert.equal(result.code, 0, result.stderr); assert.equal(JSON.parse(result.stdout).project.enabled, false);
+  await assert.rejects(fs.stat(join(stateHome, 'daemon.json')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(join(f.local, '.reroute')), { code: 'ENOENT' });
+  const invalid = await capture(process.execPath, [cli, 'setup', '--provider', 'unknown'], { cwd: f.local, env: { ...process.env, REROUTE_HOME: stateHome }, timeoutMs: 10000 });
+  assert.notEqual(invalid.code, 0); assert.match(invalid.stderr, /Provider must/);
+});
+
+for(const args of [['status','cargo','test'],['setup','--destroy'],['explain','--allow-paid','--','cargo','test']]) test('ambiguous internal options fail before writes: '+args.join(' '),async t=>{
+  const f=await context(t),result=await f.run(...args);assert.notEqual(result.code,0);assert.match(result.stderr,/priority|only valid|authorization belongs/);await f.unchanged();
 });

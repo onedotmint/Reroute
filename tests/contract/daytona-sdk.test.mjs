@@ -159,3 +159,19 @@ for (const snapshotMetadata of [{ sandboxClass: 'linux-vm', resources: {} }, { s
   await assert.rejects(f.provider.ensureReady(project, spec), e => e.code === 'UNSUPPORTED_CAPABILITY');
   assert.equal(f.calls.create.length, 0); assert.equal(f.calls.initialized, 0);
 });
+
+for (const options of [{sshHost:'-bad'}, {sshPort:0}, {sshPort:1.5}, {sshPort:65536}]) test('Daytona transport preflight before SDK loading: '+JSON.stringify(options), async () => {
+  let loaded=0; const provider=new DaytonaProvider(options,async()=>{loaded++;throw new Error('must not load');});
+  await assert.rejects(provider.ensureReady(project,spec), /SSH|host|port/); assert.equal(loaded,0);
+});
+test('custom Daytona endpoint without SSH host fails before account access', async t => {
+  const old=process.env.DAYTONA_API_URL; process.env.DAYTONA_API_URL='https://custom.example.invalid/api';
+  t.after(()=>{if(old===undefined)delete process.env.DAYTONA_API_URL;else process.env.DAYTONA_API_URL=old;});
+  let loaded=0; const provider=new DaytonaProvider({},async()=>{loaded++;throw new Error('must not load');});
+  await assert.rejects(provider.ensureReady(project,spec), /sshHost before creating/); assert.equal(loaded,0);
+});
+for(const generation of ['', 'garbage', undefined]) test('invalid recorded generation fails before native compute: '+String(generation),async()=>{
+  const {provider,calls}=boundary({state:'stopped'});
+  await assert.rejects(provider.restore(project,spec,{...runtime,meta:{workspaceGeneration:generation}}), /generation is missing/);
+  assert.deepEqual(calls.config,[]); assert.deepEqual(calls.start,[]); assert.deepEqual(calls.autoDelete,[]);
+});

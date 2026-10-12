@@ -1,5 +1,8 @@
 # Outboard delivery report
 
+Historical snapshot of the original delivery, not the current support matrix.
+OMP support has since been removed; see [safe legacy cleanup](../HARNESSES.md#legacy-omp-migration-no-longer-supported).
+
 Release: **0.1.0-preview.1**. License: Apache-2.0. Delivery date: 2026-10-06.
 
 ## What is actually delivered

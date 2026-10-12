@@ -1,11 +1,12 @@
 import type { Manifest, FileTransport, SyncPolicy } from '../core/contracts.js';
+import { HashCache } from './hash-cache.js';
 export declare function validSyncPattern(value: unknown): value is string;
 type Exclusion = {
     reason: 'minimum-security' | 'minimum-exclusion' | 'policy-exclusion';
     pattern?: string;
 };
 export declare function excluded(path: string, policy: SyncPolicy): boolean;
-export declare function scanLocal(root: string, policy: SyncPolicy): Promise<Manifest>;
+export declare function scanLocal(root: string, policy: SyncPolicy, cache?: HashCache): Promise<Manifest>;
 export interface SyncPreview {
     scope: 'local-only';
     included: {
@@ -59,11 +60,16 @@ export declare function planSync(base: Manifest, local: Manifest, remote: Manife
 export declare class Synchronizer {
     private readonly root;
     private readonly policy;
+    private readonly hashes;
+    private hashIdentity?;
+    private resetRemote;
+    resetHashes(): void;
     constructor(root: string, policy: SyncPolicy);
     reconcile(transport: FileTransport): Promise<{
         pushed: number;
         pulled: number;
     }>;
+    private reconcileFiles;
     acceptLocal(transport: FileTransport): Promise<void>;
 }
 export {};

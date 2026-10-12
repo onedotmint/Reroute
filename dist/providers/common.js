@@ -32,24 +32,40 @@ export function runtimeRef(provider, project, id, root, meta = {}) {
     invariant(typeof id === 'string' && id.length > 0 && id.length < 300, 'PROVIDER_WIRE', 'Provider returned an invalid runtime identity');
     return { provider, id, root, projectId: project.id, meta };
 }
-export async function rawCapture(raw) {
-    await raw.closeInput();
-    let text = '', bytes = 0;
-    for await (const event of raw.events) {
-        bytes += event.data.length;
-        invariant(bytes < 1024 * 1024, 'CONTROL_OUTPUT_LIMIT', 'Remote control output exceeded its limit');
-        if (event.stream === 'stdout')
-            text += event.data.toString();
+export async function rawCapture(raw, timeoutMs = 60000) {
+    let timer;
+    const operation = (async () => {
+        await raw.closeInput();
+        let text = '', bytes = 0;
+        for await (const event of raw.events) {
+            bytes += event.data.length;
+            invariant(bytes < 1024 * 1024, 'CONTROL_OUTPUT_LIMIT', 'Remote control output exceeded its limit');
+            if (event.stream === 'stdout')
+                text += event.data.toString();
+        }
+        invariant(await raw.wait() === 0, 'REMOTE_BOOTSTRAP', 'Remote bootstrap failed. Check the configured image, Python 3, filesystem permissions and native provider connectivity.');
+        return text;
+    })();
+    try {
+        return await Promise.race([operation, new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new RerouteError('CONTROL_TIMEOUT', 'Remote preparation timed out; inspect native connectivity/Python/filesystem, then retry. No local fallback was used.', 124)), timeoutMs);
+            })]);
     }
-    invariant(await raw.wait() === 0, 'REMOTE_BOOTSTRAP', 'Remote bootstrap failed. Check the configured image, Python 3, filesystem permissions and native provider connectivity.');
-    return text;
+    catch (error) {
+        void raw.kill().catch(() => { });
+        throw error;
+    }
+    finally {
+        clearTimeout(timer);
+    }
 }
 export const INITIALIZE = `import os,json,sys,uuid
 p=os.path.abspath(os.path.expanduser(sys.argv[1])); identity=sys.argv[2]
 assert os.path.realpath(p)==p, 'symlink runtime root'
 os.makedirs(p,mode=0o700,exist_ok=True)
-s=os.path.join(p,'.reroute-runtime'); os.makedirs(s,mode=0o700,exist_ok=True)
-f=os.path.join(s,'owner.json')
+s=os.path.join(p,'.reroute-runtime'); assert os.path.realpath(s)==s, 'symlink owner directory'
+os.makedirs(s,mode=0o700,exist_ok=True)
+f=os.path.join(s,'owner.json'); assert os.path.realpath(f)==f, 'symlink owner marker'
 if os.path.exists(f):
  data=json.load(open(f)); assert data['projectId']==identity, 'runtime already owned'
 else:
@@ -67,14 +83,8 @@ assert os.path.realpath(s)==s and os.path.realpath(f)==f, 'symlink owner marker'
 with open(f) as o: data=json.load(o)
 assert data['projectId']==identity and data['generation']==generation, 'workspace identity changed'
 print(json.dumps({'root':p,'projectId':data['projectId'],'generation':data['generation']}))`;
-export const DESTROY_DIRECTORY = `import os,json,sys,shutil
-p=os.path.abspath(os.path.expanduser(sys.argv[1])); identity=sys.argv[2]
-if not os.path.exists(p): sys.exit(0)
-assert os.path.basename(p)==identity and os.path.realpath(p)==p, 'unsafe runtime root'
-assert json.load(open(os.path.join(p,'.reroute-runtime','owner.json')))['projectId']==identity, 'wrong owner'
-shutil.rmtree(p)`;
 export class RemoteProvider {
-    bridge = (runtime, argv) => this.launch(runtime, argv);
+    bridge = async (runtime, argv) => { await this.verifyWorkspace(runtime); return this.launch(runtime, argv); };
     exec(runtime, request) { return execute(this.bridge, runtime, request); }
     files(runtime) { return fileTransport(this.bridge, runtime); }
     async verifyWorkspace(runtime) {

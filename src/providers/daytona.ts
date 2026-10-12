@@ -4,7 +4,6 @@ import { invariant, RerouteError } from '../core/errors.js';
 import { spawnRaw, shellCommand, type RawProcess } from '../platform/process.js';
 import { RemoteProvider, loadSdk, sdkMissing, runtimeRef } from './common.js';
 import { sshArgs } from './ssh.js';
-import type { Launch } from './channel.js';
 export type DaytonaSandboxState = 'creating' | 'restoring' | 'destroyed' | 'destroying' | 'started' | 'stopped' | 'starting' | 'stopping' | 'error' | 'build_failed' | 'pending_build' | 'building_snapshot' | 'unknown' | 'pulling_snapshot' | 'archived' | 'archiving' | 'resizing' | 'snapshotting' | 'forking' | 'pausing' | 'paused' | 'resuming' | '11184809';
 const GPU_TYPES = ['H100', 'H200', 'B300', 'RTX-PRO-6000', 'RTX-4090', 'RTX-5090', 'MI355X'] as const;
 export type DaytonaGpuType = typeof GPU_TYPES[number];
@@ -49,8 +48,6 @@ export interface DaytonaProviderOptions {
 export class DaytonaProvider extends RemoteProvider {
   readonly id = 'daytona' as const;
   readonly capabilities: Capabilities = { resources: ['cpu','memoryMiB','diskGiB','gpu','region','image','spot'], persistence: 'disk', idle: 'stop', preview: true, stdin: true, nativeIdle: true };
-  // Warm coordinator state is not proof that the remote disk still has its original owner.
-  protected override bridge: Launch = async (runtime, argv) => { await this.verifyWorkspace(runtime); return this.launch(runtime, argv); };
   private client?: DaytonaClient;
   private sdkModule?: DaytonaSdk;
   private access = new Map<string, { token: string; expires: number }>();
@@ -62,7 +59,16 @@ export class DaytonaProvider extends RemoteProvider {
   private missing(error: unknown): boolean {
     return !!this.sdkModule && sdkMissing(error, this.sdkModule.DaytonaNotFoundError);
   }
+  private validateTransport(): void {
+    if (process.env.DAYTONA_API_URL) {
+      let endpoint: URL;
+      try { endpoint = new URL(process.env.DAYTONA_API_URL); } catch { throw new RerouteError('DAYTONA_SSH_HOST', 'DAYTONA_API_URL must be an absolute URL; custom installations require providers.daytona.sshHost'); }
+      invariant(endpoint.origin === 'https://app.daytona.io' || !!this.options.sshHost, 'DAYTONA_SSH_HOST', 'Custom Daytona installations require providers.daytona.sshHost before creating a resource');
+    }
+    sshArgs({ host: this.options.sshHost ?? 'ssh.app.daytona.io', port: this.options.sshPort });
+  }
   private validateSpec(spec: RuntimeSpec): void {
+    this.validateTransport();
     assertCapabilities(spec, this.capabilities, this.id);
     invariant(!spec.gpu && !spec.spot, 'UNSUPPORTED_CAPABILITY', 'Daytona GPU/Spot sandboxes are ephemeral and cannot safely stop or restore; use a CPU container');
     invariant(this.options.autoDeleteMinutes === undefined || this.options.autoDeleteMinutes === -1, 'UNSUPPORTED_CAPABILITY', 'Daytona autoDeleteMinutes must be -1 (disabled) to preserve source');
@@ -95,7 +101,7 @@ export class DaytonaProvider extends RemoteProvider {
   }
   async restore(project: ProjectRef, spec: RuntimeSpec, runtime: RuntimeRef): Promise<RuntimeRef> {
     this.validateSpec(spec); this.validateRuntime(runtime, project.id);
-    invariant(!!runtime.meta.workspaceGeneration, 'WORKSPACE_IDENTITY', 'Original workspace generation is missing; recover its recorded identity before restoring');
+    invariant(typeof runtime.meta.workspaceGeneration === 'string' && /^[a-f0-9-]{36}$/.test(runtime.meta.workspaceGeneration), 'WORKSPACE_IDENTITY', 'Original workspace generation is missing; recover its recorded identity before restoring');
     const sandbox = await this.owned(runtime);
     invariant(sandbox.state === 'started' || sandbox.state === 'stopped' || sandbox.state === 'archived', 'PROVIDER_WIRE', 'Daytona sandbox is not safely startable; inspect its native state before retrying');
     await this.preserve(sandbox, Math.max(5, spec.idleTimeoutMinutes));
@@ -134,15 +140,16 @@ export class DaytonaProvider extends RemoteProvider {
     return this.initialize(runtimeRef(this.id, project, sandbox.id, `/tmp/reroute/${project.id}`));
   }
   async launch(runtime: RuntimeRef, argv: string[]): Promise<RawProcess> {
-    this.validateRuntime(runtime);
+    this.validateRuntime(runtime); this.validateTransport();
     let access = this.access.get(runtime.id);
     if (!access || access.expires < Date.now()) {
       const token = await (await this.owned(runtime)).createSshAccess(30);
       invariant(typeof token.token === 'string' && /^[A-Za-z0-9._-]+$/.test(token.token), 'PROVIDER_WIRE', 'Invalid short-lived Daytona SSH access token');
-      access = { token: token.token, expires: Date.now() + 20 * 60000 }; this.access.set(runtime.id, access);
+      const expires = new Date(token.expiresAt).getTime();
+      invariant(Number.isFinite(expires) && expires > Date.now() + 30000, 'PROVIDER_WIRE', 'Daytona SSH access is expired or too short-lived; retry native authentication');
+      access = { token: token.token, expires: Math.min(Date.now() + 20 * 60000, expires - 30000) }; this.access.set(runtime.id, access);
     }
     const host = String(this.options.sshHost ?? 'ssh.app.daytona.io');
-    invariant(!process.env.DAYTONA_API_URL || !process.env.DAYTONA_API_URL.includes('://') || process.env.DAYTONA_API_URL.startsWith('https://app.daytona.io/') || !!this.options.sshHost, 'DAYTONA_SSH_HOST', 'Custom Daytona installations require providers.daytona.sshHost');
     // Short-lived token stays in memory; it is never written into runtime metadata or logs.
     return spawnRaw('ssh', [...sshArgs({ host, user: access.token, port: this.options.sshPort }), shellCommand(argv)]);
   }

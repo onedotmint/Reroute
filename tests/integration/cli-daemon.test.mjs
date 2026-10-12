@@ -32,7 +32,7 @@ async function context(t) {
   return {...f,core,provider,server,reroute};
 }
 test('CLI setup discovers Pi, enables a real IPC project, routes shell and keeps Git local',async t=>{
-  const f=await context(t);await fs.mkdir(join(process.env.REROUTE_AGENT_HOME,'.pi/agent'),{recursive:true});
+  const f=await context(t);await fs.writeFile(join(f.local,'reroute.toml'), '[routing]\nremote = [["python3"]]\n');await fs.mkdir(join(process.env.REROUTE_AGENT_HOME,'.pi/agent'),{recursive:true});
   const setup=await f.reroute('setup','--harness','pi');assert.equal(setup.code,0,setup.stderr);const report=JSON.parse(setup.stdout);assert.ok(report.detected.includes('pi'));assert.deepEqual(Object.keys(report.installed),['pi']);
   assert.equal((await childRun(['git','init'],{cwd:f.local})).code,0);
   const enabled=await f.reroute('enable','--provider','ssh','--host','fixture');assert.equal(enabled.code,0,enabled.stderr);
@@ -46,7 +46,7 @@ test('CLI setup discovers Pi, enables a real IPC project, routes shell and keeps
   const piped=await f.reroute('shell','--',"printf 'binary-input' | python3 -c "+quote('import sys;sys.stdout.buffer.write(sys.stdin.buffer.read())'));
   assert.equal(piped.code,0,piped.stderr);assert.equal(piped.stdout,'binary-input');
   const exited=await f.reroute('exec','--','python3','-c',"import sys;print('out');print('err',file=sys.stderr);sys.exit(23)");assert.equal(exited.code,23,exited.stderr);assert.match(exited.stdout,/out/);assert.match(exited.stderr,/err/);
-  const status=JSON.parse((await f.reroute('status')).stdout);assert.equal(status.active,0);assert.equal(f.provider.readyCount,1);
+  const status=JSON.parse((await f.reroute('status','--json')).stdout);assert.equal(status.active,0);assert.equal(f.provider.readyCount,1);
   assert.equal((await f.reroute('doctor')).code,0);assert.equal((await f.reroute('disable')).code,0);
 });
 test('CLI enabled-provider failure cannot fall back; explicit local remains usable',async t=>{
@@ -128,3 +128,95 @@ for (const action of ['timeout', 'cancel']) {
     assert.equal(result.code, action === 'timeout' ? 124 : 130, result.stderr);
   });
 }
+
+test('setup configures a project without provisioning; shorthand shares exec and internal commands win', async t => {
+  const f = await context(t);
+  const result = await f.reroute('setup', '--provider', 'ssh', '--host', 'fixture');
+  assert.equal(result.code, 0, result.stderr); assert.equal(JSON.parse(result.stdout).project.enabled, true);
+  assert.equal(f.provider.readyCount, 0);
+  const first = await f.core.store.all(), id = first[0].project.id;
+  assert.equal((await f.reroute('setup', '--provider', 'ssh', '--host', 'fixture')).code, 0);
+  assert.equal((await f.core.store.all())[0].project.id, id);
+  const executed = await f.reroute('python3', '-c', "import sys;print('remote');sys.exit(23)");
+  assert.equal(executed.code, 23, executed.stderr); assert.equal(executed.stdout, 'remote\n');
+  const missing = await f.reroute('exec', '--', 'python3-nonexistent');
+  assert.notEqual(missing.code, 0);
+  f.provider.status = async () => { throw new Error('status must not contact provider'); };
+  const status = await f.reroute('status', '--json'); assert.equal(status.code, 0, status.stderr);
+  assert.equal(JSON.parse(status.stdout).status, 'unknown'); assert.equal(JSON.parse(status.stdout).active, 0);
+  assert.match((await f.reroute()).stdout, /Project:.*enabled/);
+});
+
+test('transparent light interpreter stays local, project script rule and explicit argv offload share the core', async t => {
+  const f = await context(t); await f.reroute('setup', '--provider', 'ssh', '--host', 'fixture');
+  const local = await f.reroute('shell', '--', 'python3 -c '+quote("import os;print(os.getcwd())"));
+  assert.equal(local.code, 0, local.stderr); assert.equal(local.stdout.trim(), f.local); assert.equal(f.provider.readyCount, 0);
+  const explicit = await f.reroute('python3', '-c', 'import os;print(os.getcwd())');
+  assert.equal(explicit.code, 0, explicit.stderr); assert.equal(explicit.stdout.trim(), f.remote);
+  const absent = await f.reroute('definitely-not-installed-reroute-fixture'); assert.equal(absent.code, 127, absent.stderr);
+  const safety = await f.reroute('npm', 'publish'); assert.notEqual(safety.code, 0); assert.match(safety.stderr, /control\/identity/);
+  await fs.writeFile(join(f.local,'build.py'), 'import os;print(os.getcwd())');
+  await fs.writeFile(join(f.local,'reroute.toml'), '[routing]\nremote = [["python3", "build.py"]]\n');
+  assert.equal((await f.reroute('enable')).code, 0);
+  const rule = await f.reroute('shell', '--', 'python3 build.py'); assert.equal(rule.code, 0, rule.stderr); assert.equal(rule.stdout.trim(), f.remote);
+  const explained = JSON.parse((await f.reroute('explain','--json','--','python3','build.py')).stdout);
+  assert.equal(explained.route,'remote'); assert.equal(explained.matchedRule,'project-remote-rule');
+});
+
+test('CLI artifacts uses the existing runtime and isolated outputs without replacement', async t => {
+  const f = await context(t); await f.reroute('setup','--provider','ssh','--host','fixture');
+  await fs.writeFile(join(f.local,'reroute.toml'),'[artifacts]\npaths = ["build/app"]\n');
+  await f.reroute('enable');
+  const absent = await f.reroute('artifacts'); assert.notEqual(absent.code,0); assert.equal(f.provider.readyCount,0);
+  const build = await f.reroute('python3','-c',"import pathlib;pathlib.Path('build').mkdir();pathlib.Path('build/app').write_bytes(b'result')");
+  assert.equal(build.code,0,build.stderr);
+  const result = await f.reroute('artifacts'); assert.equal(result.code,0,result.stderr);
+  const output = JSON.parse(result.stdout); assert.equal(await fs.readFile(join(output.directory,'build/app'),'utf8'),'result');
+  assert.equal(f.provider.readyCount,1); await assert.rejects(fs.stat(join(f.local,'build')), {code:'ENOENT'});
+});
+
+test('CLI records only explicit project/provider consent and can revoke it without cloud calls',async t=>{
+  const f=await context(t);
+  const setup=await f.reroute('setup','--provider','daytona');assert.equal(setup.code,0,setup.stderr);assert.equal(JSON.parse(setup.stdout).project.paidAuthorized,false);
+  const denied=await f.reroute('cargo','test');assert.notEqual(denied.code,0);assert.match(denied.stderr,/--allow-paid/);assert.equal(f.provider.readyCount,0);
+  const granted=await f.reroute('enable','--allow-paid');assert.equal(granted.code,0,granted.stderr);assert.equal(JSON.parse(granted.stdout).paidAuthorized,true);
+  const revoked=await f.reroute('enable','--revoke-paid');assert.equal(revoked.code,0,revoked.stderr);assert.equal(JSON.parse(revoked.stdout).paidAuthorized,false);
+  assert.equal(f.provider.readyCount,0);
+  const auth=JSON.parse((await f.reroute('auth','status')).stdout);assert.match(auth.scope,/current CLI environment/);
+});
+
+test('interactive setup prompts on a real terminal and never installs a detected agent implicitly',async t=>{
+  const f=await context(t);
+   const driver=String.raw`import os,pty,subprocess,select,time,sys,json,fcntl,termios,struct
+master,slave=pty.openpty()
+fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,70,0,0))
+child=subprocess.Popen([sys.argv[1],sys.argv[2],'setup'],stdin=slave,stdout=slave,stderr=slave)
+os.close(slave)
+text=b''; phase=0; deadline=time.monotonic()+15
+steps=[(b'Target provider',b'\x1b[B\r'),(b'Existing OpenSSH host alias',b'fixture\r'),(b'Automatically offload task categories',b' \r'),(b'Save configuration?',b'\x1b[D\r')]
+try:
+    while time.monotonic()<deadline:
+        ready,_,_=select.select([master],[],[],.05)
+        if ready:
+            try: data=os.read(master,65536)
+            except OSError: break
+            if not data: break
+            text+=data
+            if phase<len(steps) and steps[phase][0] in text:
+                time.sleep(.05);os.write(master,steps[phase][1]);phase+=1
+        if child.poll() is not None and not ready: break
+    try: code=child.wait(timeout=max(.1,deadline-time.monotonic()))
+    except subprocess.TimeoutExpired: child.kill();raise RuntimeError('interactive setup blocked: '+text.decode())
+    assert code==0,text.decode()
+    assert phase==4,text.decode()
+    print(text.decode())
+finally:
+    if child.poll() is None: child.kill();child.wait()
+    os.close(master)
+`;
+  const result=await childRun(['python3','-c',driver,process.execPath,cli],{cwd:f.local});
+  assert.equal(result.code,0,result.stderr);assert.match(result.stdout,/Target provider/);assert.match(result.stdout,/"enabled": true/);
+  assert.match(result.stdout,/"installed": \{\}/);assert.equal(f.provider.readyCount,0);
+   const state=JSON.parse(await fs.readFile(join(f.local,'.reroute/project.json'),'utf8'));
+   assert.deepEqual(state.override.routing.tasks,['test','check','benchmark']);
+});

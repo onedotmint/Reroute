@@ -7,10 +7,13 @@ applies_to:
   - src/core/contracts.ts
   - src/providers/common.ts
   - src/providers/daytona.ts
+  - src/providers/ssh.ts
   - src/config/config.ts
   - src/sync/sync.ts
   - tests/integration/runtime-recovery.test.mjs
   - tests/contract/daytona-*.test.mjs
+  - tests/contract/ssh-workspace.test.mjs
+  - tests/integration/sync-batches.test.mjs
   - tests/unit/lifecycle.test.mjs
 ---
 
@@ -38,6 +41,15 @@ not proof of remote disk identity; file and execution operations must still veri
 A stable-name sandbox without a recorded runtime/generation is deliberately refused,
 even after create-before-state-save failure. Native backup/original state recovery is
 safer than silently adopting an unverifiable workspace.
+
+For SSH, directory existence is not proof of owner/generation. A recorded workspace
+must be verified before file/execution/destruction operations, never initialized
+to repair lost ownership. Destruction's absent-directory success requires the safe
+original path; symlinks, ENOTDIR and connectivity failures are not absence.
+
+Bounded transfer batches retain each path's expected hash, deletion-first order
+and agreed-baseline-on-full-success semantics. A partial batch failure must remain
+retryable without advancing the baseline or weakening conflict evidence.
 
 # Crash-stop is not destructive expiry
 

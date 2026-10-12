@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { ProjectStore, findProject } from './projects.js';
+import { ProjectStore, findProject, projectRoot } from './projects.js';
 import { loadConfig } from '../config/config.js';
 import { SerialLane } from './queue.js';
 import { Synchronizer } from '../sync/sync.js';
+import { fetchArtifacts } from '../sync/artifacts.js';
 import { Lifecycle } from './lifecycle.js';
 import { mapArgv, remoteCwd, route } from './routing.js';
 import { invariant, RerouteError, safeMessage } from './errors.js';
@@ -50,6 +51,7 @@ export class Coordinator {
             if (!fresh)
                 throw error;
         }
+        const config = await loadConfig(await projectRoot(cwd), { ...override, provider });
         const pending = previous && this.entries.get(previous.project.id);
         if (!pending)
             return this.store.enable(cwd, provider, override, fresh);
@@ -57,10 +59,10 @@ export class Coordinator {
         invariant(!entry.active.size && !entry.dev, 'PROJECT_BUSY', 'Stop active commands/dev sessions before changing project configuration');
         return entry.lane.run(async () => {
             invariant(!entry.active.size && !entry.dev, 'PROJECT_BUSY', 'Project became active during configuration change');
-            const config = await loadConfig(previous.project.root, { ...override, provider });
             const state = await this.store.enable(cwd, provider, override, fresh);
             entry.lifecycle?.dispose();
             entry.lifecycle = undefined;
+            entry.pendingRelease = undefined;
             entry.warm = false;
             if (fresh) {
                 this.entries.delete(previous.project.id);
@@ -70,8 +72,6 @@ export class Coordinator {
             entry.config = config;
             entry.provider = this.factory(config);
             entry.sync = new Synchronizer(state.project.root, config.sync);
-            if (state.syncPending)
-                await this.ready(entry, true);
             return state;
         });
     }
@@ -111,22 +111,25 @@ export class Coordinator {
     validateRuntime(entry, runtime) {
         invariant(runtime.provider === entry.state.provider && runtime.provider === entry.provider.id && runtime.projectId === entry.state.project.id, 'WRONG_RUNTIME', 'Runtime identity does not belong to this project/provider; no replacement or destruction was attempted');
     }
-    async ready(entry, existingOnly = false) {
+    async ready(entry, existingOnly = false, stopping = false) {
+        const authorized = entry.state.provider === 'ssh' || entry.config.authorization?.paidProviders.includes(entry.state.provider) === true;
+        invariant(authorized || (stopping && entry.state.runtime), 'PAID_CONSENT', `Remote compute may incur charges. Authorize this project/provider explicitly with reroute enable --provider ${entry.state.provider} --allow-paid after reviewing native budgets and cleanup. Credentials/setup are not consent; no runtime was created or resumed.`);
         const retained = existingOnly || entry.state.syncPending;
         invariant(!entry.state.syncPending || entry.state.runtime, 'SOURCE_PENDING', 'Pending source has no recorded runtime; recover its original state instead of creating a replacement');
         const previous = entry.state.runtime;
         let restored;
         if (previous) {
             this.validateRuntime(entry, previous);
-            if (!entry.warm || retained || Date.now() - entry.verifiedAt > 5000) {
+            if (!entry.warm || retained || !authorized || Date.now() - entry.verifiedAt > 5000) {
                 const status = await entry.provider.status(previous);
+                invariant(authorized || status === 'running', 'PAID_CONSENT', 'Stopping may reconcile an already-running runtime without new consent, but resuming paid compute requires reroute enable --allow-paid');
                 invariant(status !== 'unknown', 'RUNTIME_UNKNOWN', 'Runtime status could not be established. Check native connectivity; no replacement was created.');
                 if (status !== 'running') {
                     entry.warm = false;
                     entry.lifecycle?.dispose();
                     entry.pendingRelease = undefined;
                 }
-                if (status === 'stopped' || status === 'archived' || (status === 'running' && retained && !entry.warm && entry.provider.restore)) {
+                if (status === 'stopped' || status === 'archived' || (status === 'running' && retained && !entry.warm && entry.provider.restore && authorized)) {
                     if (entry.provider.restore) {
                         const generation = entry.generation;
                         invariant(!this.closing, 'CANCELLED', 'Coordinator is shutting down; original runtime was not resumed');
@@ -156,6 +159,7 @@ export class Coordinator {
         }
         if (entry.warm)
             return;
+        entry.sync.resetHashes(); // Cold/recovery paths must not trust pre-stop scan metadata.
         const runtime = restored ?? (retained && previous ? previous : await entry.provider.ensureReady(entry.state.project, entry.config.runtime, previous));
         this.validateRuntime(entry, runtime);
         if (retained && previous)
@@ -184,7 +188,7 @@ export class Coordinator {
     async run(input, hooks = {}) {
         const generation = this.generation, entry = await this.entry(input.cwd);
         this.checkExecution(entry, generation);
-        invariant(route(input.argv, entry.config.routing.commands) === 'remote', 'CONTROL_PLANE', 'This executable is a local control-plane command or is not in routing.commands. Use reroute local -- ... or configure the runtime command group.');
+        invariant(route(input.argv, entry.config.routing.commands, entry.config.routing, input.explicit !== false) === 'remote', 'CONTROL_PLANE', 'This is a control/identity or ambiguous command, or transparent policy keeps it local. Use reroute local -- ...; remote failure never falls back locally.');
         return entry.lane.run(async () => {
             const id = randomUUID();
             let release;
@@ -258,10 +262,27 @@ export class Coordinator {
             }
         });
     }
+    async artifacts(cwd) {
+        const generation = this.generation, entry = await this.entry(cwd);
+        invariant(entry.state.runtime, 'NO_RUNTIME', 'No recorded runtime; artifacts never creates a workspace. Execute a build first.');
+        invariant(entry.config.artifacts?.paths.length, 'ARTIFACT_PATH', 'Set [artifacts] paths = ["target/release/YOUR_BINARY"] in reroute.toml');
+        return entry.lane.run(async () => {
+            this.checkExecution(entry, generation);
+            await this.ready(entry, true);
+            this.checkExecution(entry, generation);
+            const release = await entry.lifecycle.acquire();
+            try {
+                return await fetchArtifacts(entry.state.project.root, entry.config.artifacts, entry.provider.files(entry.state.runtime));
+            }
+            finally {
+                await release();
+            }
+        });
+    }
     async devStart(input, port) {
         const generation = this.generation, entry = await this.entry(input.cwd);
         this.checkExecution(entry, generation);
-        invariant(route(input.argv, entry.config.routing.commands) === 'remote', 'CONTROL_PLANE', 'Dev commands must use a configured runtime executable');
+        invariant(route(input.argv, entry.config.routing.commands, entry.config.routing, input.explicit !== false) === 'remote', 'CONTROL_PLANE', 'Dev commands must use a configured runtime executable');
         return entry.lane.run(async () => {
             this.checkExecution(entry, generation);
             invariant(!entry.dev, 'DEV_EXISTS', 'A dev session already exists. Use reroute dev stop first.');
@@ -368,8 +389,8 @@ export class Coordinator {
                 invariant(status !== 'unknown', 'RUNTIME_UNKNOWN', 'Runtime status could not be established; no stop or destruction was attempted');
                 const resumable = (status === 'stopped' || status === 'archived') && !!entry.provider.restore;
                 invariant(status === 'running' || resumable || (!entry.state.syncPending && (!destroy || status === 'missing')), 'SOURCE_PENDING', 'Resume the original runtime with native provider tools and synchronize before destroying it');
-                if (status === 'running' || resumable) {
-                    await this.ready(entry, true);
+                if (status === 'running' || (resumable && (destroy || entry.state.syncPending))) {
+                    await this.ready(entry, true, true);
                     await this.reconcile(entry);
                 }
                 entry.lifecycle?.dispose();
@@ -406,10 +427,7 @@ export class Coordinator {
         if (!state)
             return { enabled: false, message: 'No Reroute project here' };
         const entry = await this.entry(cwd, true);
-        let status = 'not-created';
-        if (entry.state.runtime)
-            status = await entry.provider.status(entry.state.runtime);
-        return { enabled: state.enabled, project: state.project, provider: state.provider, runtime: entry.state.runtime?.id, status, active: entry.active.size, dev: entry.dev?.id, syncPending: entry.state.syncPending === true, warning: entry.error };
+        return { enabled: state.enabled, project: state.project, provider: state.provider, runtime: entry.state.runtime?.id, status: entry.state.runtime ? 'unknown' : 'not-created', remoteReadiness: 'UNVERIFIED', billing: 'UNKNOWN', active: entry.active.size, dev: entry.dev?.id, syncPending: entry.state.syncPending === true, warning: entry.error };
     }
     shutdown() {
         this.closing = true;
@@ -469,7 +487,10 @@ export class Coordinator {
                         entry.error = 'Original runtime has pending source. Run reroute sync to resume a supported stopped/archived runtime; otherwise recover it with native tools. No replacement was created.';
                 });
             }
-            catch {
+            catch (error) {
+                const pending = this.entries.get(state.project.id), entry = pending && await pending.catch(() => undefined);
+                if (entry)
+                    entry.error = safeMessage(error);
                 await log('recovery_needs_attention', { project: state.project.id });
             }
         }

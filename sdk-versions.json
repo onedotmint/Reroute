@@ -7,5 +7,6 @@
   "verification": "Daytona structural interfaces and create overloads are checked against the real @daytona/sdk@0.223.1 declarations with TypeScript 5.8.3. Other full vendor declaration checks and all live cloud contracts remain unverified.",
   "modalCancellationVerification": "modal@0.11.0 downloaded for inspection: ContainerProcess.closeStdin() bypasses WritableStream state. Tested with the actual provider class and a real Python worker behind an SDK boundary fixture; no live cloud validation.",
   "daytonaVerification": "Real npm @daytona/sdk@0.223.1 installed in .tools for offline declaration checks and typed error tests; no Daytona client is instantiated, no credentials used, no cloud calls. Core and public declarations retain zero SDK runtime/type dependencies.",
-  "harnesses": { "piPackage": "@earendil-works/pi-coding-agent", "ompInspected": "@oh-my-pi/pi-coding-agent@18.6.3", "deepseekPackage": "@deepseek-ai/dsh-bash-local", "opencode": "v2 shell.create.before only" }
+  "interactiveManagement": { "piVerified": "1.1.0", "standaloneClackPrompts": "1.8.1", "clackCore": "1.5.1", "license": "MIT", "note": "Pi SDK/TUI are host-supplied; only standalone setup bundles the prompt dependency tree. Local WSL2/native TUI checks are not cloud acceptance." },
+  "harnesses": { "piPackage": "@earendil-works/pi-coding-agent", "deepseekPackage": "@deepseek-ai/dsh-bash-local", "opencode": "v2 shell.create.before only" }
 }

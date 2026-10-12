@@ -103,7 +103,14 @@ test('preview and both scanners share exclusions and never read/hash excluded co
   const secrets = ['.env', '.env.production', '.npmrc', 'nested/credentials.json', 'nested/private.pem', 'nested/id_ed25519', '.aws/credentials', '.reroute/sync-base.json', '.outboard/state', 'node_modules/cache'];
   for (const path of [...secrets, 'src/a.txt', 'src/nested/a.txt', 'notes/file', 'keep']) await put(root, path);
   const p = { ...policy, excludes: ['src/*.txt', 'notes/'] }, allowed = ['keep', 'src/nested/a.txt'];
-  const read = fs.readFile, reads = [];
+  const read = fs.readFile, open = fs.open, reads = [];
+  fs.open = async (path, ...args) => {
+    const rel = String(path).slice(root.length + 1);
+    assert.ok(allowed.includes(rel), `must not open excluded ${rel}`);
+    const file = await open(path, ...args), read = file.read.bind(file);
+    file.read = async (...args) => { const result = await read(...args); if (result.bytesRead) reads.push(rel); return result; };
+    return file;
+  };
   fs.readFile = async (path, ...args) => {
     const rel = String(path).slice(root.length + 1); reads.push(rel);
     assert.ok(allowed.includes(rel), `must not read excluded ${rel}`);
@@ -111,11 +118,13 @@ test('preview and both scanners share exclusions and never read/hash excluded co
   };
   try {
     assert.deepEqual(Object.keys(await scanLocal(root, p)), allowed);
+    const beforePreview = [...reads];
     assert.deepEqual((await syncPreview(root, p)).included.map(row => row.path), allowed);
-  } finally { fs.readFile = read; }
+    assert.deepEqual(reads, beforePreview, 'preview must not read content');
+  } finally { fs.readFile = read; fs.open = open; }
   assert.deepEqual(reads, allowed);
-  const remote = python("old=ns['digest']\ndef guarded(path,*args,**kwargs):\n rel=ns['os'].path.relpath(path,data['root']).replace(ns['os'].sep,'/')\n assert rel in data['allowed'],rel\n return old(path,*args,**kwargs)\nns['digest']=guarded\nprint(json.dumps(sorted(ns['scan'](data['root'],data['policy']))))", { root, policy: p, allowed });
-  assert.deepEqual(remote, allowed);
+  const remote = python("old=ns['read_stable']\nreads=[]\ndef guarded(path,*args,**kwargs):\n rel=ns['os'].path.relpath(path,data['root']).replace(ns['os'].sep,'/')\n assert rel in data['allowed'],rel\n reads.append(rel)\n return old(path,*args,**kwargs)\nns['read_stable']=guarded\nmanifest=ns['scan'](data['root'],data['policy'])\nprint(json.dumps([sorted(manifest),sorted(reads)]))", { root, policy: p, allowed });
+  assert.deepEqual(remote, [allowed, allowed]);
   for (const path of secrets) assert.equal(excluded(path, policy), true, `minimum exclusion: ${path}`);
 });
 

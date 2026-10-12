@@ -16,7 +16,8 @@ short idle interval. Never begin with a production repository or valuable secret
 - In the disposable project, run `reroute setup` and confirm no harness is installed
   automatically. Then `reroute sync --dry-run --json` and
   `reroute explain --json -- pnpm test`. Confirm no daemon, resource or project identity
-  was created by these read-only commands (`setup` itself may start the local coordinator).
+  was created by these read-only commands. Noninteractive setup without project flags
+  also does not start a coordinator; explicit project enable starts local IPC only.
 - Include synthetic `.env`, `.npmrc`, a fake private-key filename, ignored cache,
   symlink, oversized file and unsupported exclude syntax. Check exclusions/errors;
   remove blockers before activation. Dry-run is not a secret detector or remote
@@ -31,15 +32,21 @@ short idle interval. Never begin with a production repository or valuable secret
   hard TTL or auto-delete. An optional snapshot must expose CPU-container metadata.
 - Run `reroute setup --install-sdk daytona --harness pi` deliberately. Inspect exactly
   which owned extension was installed; restart Pi. Record only redacted configuration.
-- Run `reroute enable --provider daytona`, `reroute doctor`, then the first harmless
-  intercepted runtime command. `doctor --probe` only performs the supported native SSH
+- Only after approval, run `reroute setup --provider daytona --allow-paid`,
+  `reroute doctor`, then `reroute exec -- python3 --version` (a plain version probe
+  is deliberately local under task routing). `doctor --probe` only performs the supported native SSH
   probe; it does not provision or certify Daytona. Verify the native sandbox ID/project label.
 - Confirm the native Bash tool name, permissions, output shape, streaming and abort
   remain intact; there is no new model-facing remote execution tool or sandbox ID in
-  the prompt. Confirm remote cwd/toolchain and local Git/editor/source authority.
+  the prompt. Confirm remote cwd/toolchain and local Git/editor/source authority. Use `reroute`
+  and `status --json` to confirm metadata-only status does not activate compute;
+  inspect native state separately, since Reroute marks remote state unverified.
 - Exercise stdin, stdout/stderr, a nonzero exit, timeout (124), cancellation (130),
   generated source/lockfiles returning locally and excluded caches staying remote.
-  Force a provider failure and confirm it does not execute locally.
+  Configure one exact artifact path, fetch it into a fresh private output directory,
+  and verify source/cache separation. Force a provider failure and confirm it does
+  not execute locally. Exercise missing auth and absent paid consent before first
+  activation; no resource may be created/resumed under a denial.
 
 ## 3. Activity, idle and browser preview
 
@@ -94,3 +101,34 @@ short idle interval. Never begin with a production repository or valuable secret
 Accept only when each required outcome has evidence; otherwise record **UNVERIFIED**
 or **FAILED**, retain recoverable source and stop the trial. Other providers/platforms
 remain separate acceptance tasks and are not certified by this Daytona/Pi procedure.
+
+## Existing SSH + Pi acceptance (separate UNVERIFIED gate)
+
+Obtain owner permission for the existing host and a disposable workspace; SSH does
+not imply free compute or permission to delete host data. Verify the host key and
+batch authentication with native OpenSSH, then run:
+
+```sh
+reroute setup --provider ssh --host ACCEPTED_ALIAS --harness pi
+reroute doctor --probe
+reroute
+reroute exec -- python3 --version
+reroute cargo test
+reroute status --json
+```
+
+Restart native Pi and verify its ordinary Bash permissions, streaming, input,
+nonzero exit, abort and timeout. Compare local Git/source before and after generated
+source returns. Test exclusions, divergence/deletions/concurrent edits, return-sync
+failure and daemon restart using synthetic files. Retain original UUID/root/owner
+generation and agreed baseline; missing/changed/symlink marker must never cause
+repair, replacement or local deletion. Restore the original test state before
+cleanup. Fetch one explicit artifact and confirm it cannot overwrite source.
+
+`stop` must cancel work/tunnels without powering off the host. Only if specifically
+approved, `stop --destroy` may delete the verified disposable UUID directory;
+confirm other directories and host operation survive. Uninstall Pi and confirm
+unrelated/edited configuration remains. Record redacted native evidence, not just
+fixture/CLI success. Actual host/OS compatibility and native Pi remain UNVERIFIED
+until this procedure succeeds. No acceptance authorization is inferred from
+credentials being present or this document existing.

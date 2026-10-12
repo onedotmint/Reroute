@@ -11,7 +11,7 @@ delivery environment, not every developer's current machine. The remaining gaps 
    behavior, not vendor acceptance, native auth, previews or cloud persistence.
 2. **Not universally zero-config.** Remote Python 3 and project toolchains must
    exist. Provider auth is external. OpenCode v2 and DeepSeek need native activation;
-   OMP only covers Bash; Codex requires a deliberate approval-related opt-in.
+   OMP support has been removed (see [safe legacy cleanup](HARNESSES.md#legacy-omp-migration-no-longer-supported)); Codex requires a deliberate approval-related opt-in.
    Continue is unimplemented. No native-host compatibility matrix is certified.
 3. **Hard-crash billing gap.** An independent remote billing watchdog is absent.
    Daytona now keeps finite native auto-stop with active activity renewal (live
@@ -25,8 +25,10 @@ delivery environment, not every developer's current machine. The remaining gaps 
    EOF, cancellation, timeout and process-group cleanup exist. Ctrl+C maps to a
    cancellation/TERM flow rather than preserving every original POSIX signal.
 6. **Sync performance/semantics.** Incremental file transfer still hashes whole
-   source trees and invokes a worker RPC for individual changed files. Very large
-   trees/high-latency links are not benchmarked. No Mutagen/rsync transport is wired;
+   source trees. Small pushes now use bounded guarded batches; reads/return sync
+   remain per-file. [Offline benchmarks](BENCHMARK.md) cover up to 2,048 small
+   files / four 16 MiB files; very large trees, cold storage and real high-latency
+   links are not benchmarked. No Mutagen/rsync transport is wired;
    native guarded transfer avoids requiring rsync on Windows. Symlinks are rejected.
    Glob syntax and TOML syntax are intentionally limited. Filesystem races are
    optimistic with backups, not transactional. Ignore rules are not DLP.
@@ -37,19 +39,22 @@ delivery environment, not every developer's current machine. The remaining gaps 
    is the attach step. Ports are explicit, not automatically discovered.
 8. **Provider-specific gaps.** Not every native SDK feature is surfaced. No custom
    private-registry image secret bridge, general snapshot API, quota management,
-   cross-provider artifact retrieval or nested-Docker guarantee. Modal volume
+   arbitrary/streaming artifact download or nested-Docker guarantee. Explicit
+   configured build files can be fetched from the current runtime, up to 32 MiB each. Modal volume
    commit persistence and multi-day dev lifetime require live validation. E2B
    `autoPause=false` and SkyPilot spot autodown discard mutable runtime state.
 9. **Platform/package limits.** Linux/POSIX runtime tested; native Windows and macOS
    not tested. Native Windows needs Git Bash and unverified ACL/pipe paths. The
    package was not published to npm. Builds use explicit local TS tooling; runtime
-   is dependency-free; release tests need isolated pinned developer SDK/tooling. pnpm/Vitest were not installed/tested.
+   loads Clack only for standalone interactive setup; npm tarballs bundle its small MIT dependency tree. Release tests need isolated pinned developer SDK/tooling. pnpm lock resolution is checked; Vitest is not used.
 10. **Setup/doctor scope.** Discovery checks binaries/directories and repairs owned
     files; it is not exhaustive host-version conflict detection or cloud service
     diagnosis. Native authentication is presence-detected, not validated by setup.
     Default setup does not auto-install detected hosts. Explicit safe uninstall
      removes only unchanged owned adapter files/exact hook entries and is not cloud cleanup.
-     Re-run enable after config changes.
+     Re-run enable after config changes. Paid resource authorization is explicit;
+     credential presence and legacy enabled state are not grants. Resource stop/delete
+     still cannot certify zero billing or actual retained-disk persistence.
 
 These are not hidden TODO provider classes: actual implementations live in
 `src/providers/`, shared local contracts run, and the archive is executable. The

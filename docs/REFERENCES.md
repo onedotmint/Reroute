@@ -15,7 +15,7 @@ a cloud API accepted our requests. Exact optional dependency status is in
 | Pi | `https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/examples/extensions/ssh.ts`; extension docs | Native Bash operations, cancellation, result shape and lifecycle |
 | claude-remote-shell | `https://raw.githubusercontent.com/torarnv/claude-remote-shell/main/claude-remote-shell` | Local file authority + remote shell; source flush/reconcile boundary |
 | DeepSeek Harness | `https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/shell/bash-local/src/index.ts`; capability-seams and shell subsystem docs | Real `LocalBashExecutor.execute(spec)` delegation; inherited handles instead of a new tool |
-| OMP | `https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/extensibility/extensions/types.ts`; `src/extensibility/shared-events.ts`; package manifest | Current tool-call `input` replacement; user-shell result contract differs from Pi |
+| OMP (historical; support removed) | `https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/extensibility/extensions/types.ts`; `src/extensibility/shared-events.ts`; package manifest | Historical tool-call `input` replacement; no current OMP adapter |
 
 AFT, Magic Context, pi-rtk and claude-remote-shell were MIT-design references, not
 bundled source. The project itself is Apache-2.0. The user-specified
@@ -70,6 +70,26 @@ Other design-only documentation:
 Notable source-driven decisions: Modal uses `regions`, not `region`; its registry
 image construction is synchronous and sandbox lifetime is not VM stop/start.
 E2B resource allocation is template-owned and its inspected lifecycle uses
-`onTimeout` / `autoResume`. OMP user shell cannot reuse Pi's operations shape.
+`onTimeout` / `autoResume`. The historical OMP user shell could not reuse Pi's operations shape; OMP support is now removed.
 Codex replacement requires an allow decision, so activation is explicit. OpenCode
 v2 shell hooks are not represented as v1 plugin compatibility.
+
+## Native management UI references
+
+Pi 1.1.0's installed `docs/extensions.md`, `docs/tui.md`, `examples/extensions/tools.ts`
+and `pi-tui` component declarations/implementations were checked directly. They own
+`registerCommand`, `ui.custom`, SelectList/SettingsList, native selection keybindings
+and terminal width/rendering. The packages declare MIT licensing and are supplied
+by Pi rather than bundled here. The management entry uses static host imports so
+Pi's loader mapping applies; helper `.mjs` imports alone cannot supply that mapping.
+
+Clack's current npm `@clack/prompts@1.8.1` / `@clack/core@1.5.1` implementations and
+MIT licenses were checked, including multiselect Space/Enter and Esc/Ctrl+C
+cancellation, initial values and stream/TTY handling. The small dependency tree is
+consumed intact, not copied or reimplemented; standalone PTY tests verify its actual
+behavior. Upstream references: [Pi TUI](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/tui.md),
+[SelectList](https://github.com/earendil-works/pi/blob/main/packages/tui/src/components/select-list.ts),
+[SettingsList](https://github.com/earendil-works/pi/blob/main/packages/tui/src/components/settings-list.ts),
+[Clack](https://github.com/bombshell-dev/clack). Direct GitHub retrieval was unavailable
+in this environment, so installed/npm interfaces, not assumptions about an old
+GitHub checkout, were used. See [interactive management](INTERACTIVE.md).

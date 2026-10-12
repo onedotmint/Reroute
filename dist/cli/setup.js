@@ -13,7 +13,8 @@ import { loadConfig } from '../config/config.js';
 import { findProject } from '../core/projects.js';
 import { RerouteError, invariant, errorCode, safeMessage } from '../core/errors.js';
 import { createProvider } from '../providers/index.js';
-export const HARNESSES = ['pi', 'omp', 'claude', 'codex', 'deepseek', 'opencode', 'cursor'];
+export const HARNESSES = ['pi', 'claude', 'codex', 'deepseek', 'opencode', 'cursor'];
+const OWNERSHIP_HARNESSES = [...HARNESSES, 'omp'];
 export const SDKS = { daytona: '@daytona/sdk@0.223.1', modal: 'modal@0.11.0', e2b: 'e2b@2.52.1' };
 export function agentHome() { return process.env.REROUTE_AGENT_HOME ?? homedir(); }
 export async function binary(name) {
@@ -30,7 +31,7 @@ export async function binary(name) {
     return undefined;
 }
 export async function detectHarnesses() {
-    const paths = { pi: ['.pi/agent'], omp: ['.omp/agent', '.omp'], claude: ['.claude'], codex: ['.codex'], deepseek: ['.dsh'], opencode: ['.config/opencode'], cursor: ['.cursor'] };
+    const paths = { pi: ['.pi/agent'], claude: ['.claude'], codex: ['.codex'], deepseek: ['.dsh'], opencode: ['.config/opencode'], cursor: ['.cursor'] };
     const found = [];
     for (const id of HARNESSES)
         if (await binary(id === 'deepseek' ? 'dsh' : id) || (await Promise.all(paths[id].map(p => exists(join(agentHome(), p))))).some(Boolean))
@@ -57,7 +58,7 @@ async function ownership() {
     await safeAdapterPath(path);
     const value = await readJSON(path);
     invariant(value === undefined || (value && typeof value === 'object' && !Array.isArray(value) && Array.isArray(value.commands) && value.commands.every(command => typeof command === 'string') &&
-        (value.entries === undefined || (Array.isArray(value.entries) && value.entries.every(entry => entry && HARNESSES.includes(entry.harness) && typeof entry.path === 'string' &&
+        (value.entries === undefined || (Array.isArray(value.entries) && value.entries.every(entry => entry && OWNERSHIP_HARNESSES.includes(entry.harness) && typeof entry.path === 'string' &&
             (entry.kind === 'file' ? typeof entry.hash === 'string' : entry.kind === 'hook' && typeof entry.event === 'string' && entry.entry && typeof entry.entry === 'object' && !Array.isArray(entry.entry)))))), 'ADAPTER_CONFIG', 'Invalid adapter ownership registry; left unchanged');
     return { commands: value?.commands ?? [], entries: value?.entries ?? [] };
 }
@@ -135,16 +136,12 @@ export async function mergeHookFile(path, host) {
     await saveOwnership(registry);
 }
 export async function installHarness(id) {
+    invariant(HARNESSES.includes(id), 'CONFIG', 'Unknown or unsupported harness; OMP is uninstall-only');
     const url = (name) => JSON.stringify(pathToFileURL(join(packageRoot, 'adapters', name + '.mjs')).href);
     switch (id) {
         case 'pi': {
             const path = join(agentHome(), '.pi/agent/extensions/reroute.ts');
-            await managedFile(id, path, `import * as sdk from '@earendil-works/pi-coding-agent';\nimport { registerPi } from ${url('pi')};\nexport default pi => registerPi(pi, sdk);\n`);
-            return path;
-        }
-        case 'omp': {
-            const path = join(agentHome(), '.omp/agent/extensions/reroute.ts');
-            await managedFile(id, path, `export { default } from ${url(id)};\n`);
+            await managedFile(id, path, `import * as sdk from '@earendil-works/pi-coding-agent';\nimport * as tui from '@earendil-works/pi-tui';\nimport { registerPi } from ${url('pi')};\nexport default pi => registerPi(pi, sdk, tui);\n`);
             return path;
         }
         case 'claude': {
@@ -205,7 +202,7 @@ async function ownedState(entry) {
 }
 /** Remove only recorded, unchanged adapters; never remove settings, backups or runtime state. */
 export async function uninstall(options = {}) {
-    invariant(options.harnesses === undefined || (Array.isArray(options.harnesses) && options.harnesses.every(id => HARNESSES.includes(id))), 'CONFIG', 'Unknown harness');
+    invariant(options.harnesses === undefined || (Array.isArray(options.harnesses) && options.harnesses.every(id => OWNERSHIP_HARNESSES.includes(id))), 'CONFIG', 'Unknown harness');
     const registry = await ownership(), result = { removed: [], preserved: [], warnings: [] };
     const selected = new Set(options.harnesses ?? HARNESSES), retained = [];
     for (const entry of registry.entries) {
@@ -275,6 +272,8 @@ export async function installSdk(provider) {
 }
 export async function authStatus() {
     return {
+        scope: 'current CLI environment only; credentials present does not mean verified authentication',
+        next: 'reroute auth reload refreshes the coordinator environment; no credential value is returned',
         daytona: process.env.DAYTONA_API_KEY ? 'environment present (not verified)' : 'DAYTONA_API_KEY missing',
         e2b: process.env.E2B_API_KEY ? 'environment present (not verified)' : 'E2B_API_KEY missing',
         modal: process.env.MODAL_TOKEN_ID && process.env.MODAL_TOKEN_SECRET || await exists(join(homedir(), '.modal.toml')) ? 'native credentials present (not verified)' : 'native credentials missing',
@@ -283,6 +282,7 @@ export async function authStatus() {
     };
 }
 export async function setup(options) {
+    invariant(options.harnesses === undefined || (Array.isArray(options.harnesses) && options.harnesses.every(id => HARNESSES.includes(id))), 'CONFIG', 'Unknown or unsupported harness; OMP is uninstall-only');
     await privateDir(home());
     await installShims();
     if (options.install)
@@ -298,10 +298,9 @@ export async function setup(options) {
             }
             installed[id] = await installHarness(id);
         }
-    await ensureDaemon();
     const previous = await readJSON(join(home(), 'setup.json'));
     await writeJSON(join(home(), 'setup.json'), { installed: { ...previous?.installed, ...installed }, detected, version: '0.1.0-preview.1' });
-    return { detected, installed, warnings, auth: await authStatus(), daemon: await request({ op: 'ping' }), note: 'Detected harnesses are not installed automatically; use --harness explicitly. Restart configured harnesses. OpenCode/DSH need native plugin activation. Remote runtimes are created on first execution, not by setup.' };
+    return { detected, installed, warnings, auth: await authStatus(), host: { node: process.version, platform: process.platform, ssh: await binary('ssh'), python3: await binary('python3') }, note: 'Detected harnesses are not installed automatically; use --harness explicitly. Restart configured harnesses. OpenCode/DSH need native plugin activation. Remote runtimes are created on first execution, not by setup.' };
 }
 export async function doctor(cwd, fix, probe) {
     const checks = [];
@@ -323,6 +322,12 @@ export async function doctor(cwd, fix, probe) {
         await installShims();
     try {
         const registry = await ownership();
+        const legacy = registry.entries.filter(entry => entry.harness === 'omp'), legacyPath = adapterPath('omp');
+        if (legacy.length || await fs.lstat(legacyPath).then(() => true, error => { if (errorCode(error) === 'ENOENT')
+            return false; throw error; })) {
+            add('harness omp', 'LEGACY', { paths: legacy.length ? legacy.map(entry => entry.path) : [legacyPath], states: await Promise.all(legacy.map(ownedState)),
+                note: 'OMP support was removed; never reinstalled. Use reroute uninstall --harness omp for unchanged recorded files only; review unrecorded or modified files manually.' });
+        }
         for (const id of HARNESSES) {
             const entries = registry.entries.filter(entry => entry.harness === id);
             if (!entries.length) {
@@ -360,7 +365,7 @@ export async function doctor(cwd, fix, probe) {
         const state = await findProject(cwd), config = await loadConfig(state?.project.root ?? cwd, state ? { ...state.override, provider: state.provider } : {});
         add('config', 'OK', { provider: config.provider, project: state?.project.id, enabled: state?.enabled ?? false });
         if (state?.runtime)
-            add('runtime', 'INFO', await request({ op: 'status', cwd }));
+            add('runtime', 'INFO', await request({ op: 'status', cwd }, false));
         if (probe) {
             if (config.provider === 'ssh') {
                 const options = config.providers.ssh ?? {}, provider = createProvider(config);

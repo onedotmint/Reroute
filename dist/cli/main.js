@@ -5,27 +5,34 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { home } from '../platform/files.js';
 import { RerouteError, invariant, safeMessage, errorCode } from '../core/errors.js';
 import { findProject, projectRoot } from '../core/projects.js';
-import { loadConfig, merge, PROVIDERS } from '../config/config.js';
-import { activationEnv, installShims } from '../core/activation.js';
+import { loadConfig, PROVIDERS } from '../config/config.js';
+import { activationEnv } from '../core/activation.js';
 import { route, routingDecision, selectedEnvironment, unshimmedPath } from '../core/routing.js';
 import { remoteRun, request, reloadDaemon } from '../daemon/client.js';
 import { syncPreview } from '../sync/sync.js';
 import { transformHook } from '../adapters/hooks.js';
+import { projectConfiguration, enableProject, localStatus, runtimeStatus } from './manage.js';
 import { setup, uninstall, doctor, authStatus, HARNESSES } from './setup.js';
 const VERSION = '0.1.0-preview.1';
 const HELP = `Reroute ${VERSION} - local source, remote project execution
 
-  reroute setup [--harness pi,claude,codex] [--install-sdk daytona|modal|e2b]
-    Default setup is Reroute-only; detected harnesses are not automatically installed.
+  reroute                         Show local status (no activation or cloud calls)
+  reroute setup [--provider PROVIDER] [--host SSH_ALIAS] [--harness pi,claude,codex] [--install-sdk daytona|modal|e2b]
+    TTY: guided provider/routing setup. --non-interactive or --json: explicit flags.
+    --tasks build,test,check,benchmark (or none); detected harnesses are never auto-installed.
   reroute uninstall [--harness pi,claude]  Remove unchanged owned adapters only
   reroute enable [--provider daytona|ssh|skypilot|modal|e2b] [--host SSH_ALIAS]
   reroute disable                 Stop this project's work and disable interception
-  reroute status                  Show project/runtime state
+   reroute status [--json] [--live]  Local metadata; --live explicitly queries provider
+  reroute COMMAND [ARGS...]        Explicit remote argv execution; not a shell script
   reroute doctor [--fix] [--probe] Inspect host, adapters, auth, IPC and connectivity
   reroute explain [--json] -- COMMAND [ARGS...]  Explain transparent routing; no execution
   reroute exec [--timeout-ms N] -- COMMAND [ARGS...]
   reroute local -- COMMAND        Explicit local override (never automatic fallback)
+  reroute enable --allow-paid      Authorize paid resources for this project/provider
+  reroute enable --revoke-paid     Revoke authorization (not cloud stop/cleanup)
   reroute start | reroute stop [--destroy]
+  reroute artifacts               Fetch configured build files into .reroute/artifacts/UUID
   reroute sync [--accept-local]    Reconcile source; explicit local conflict resolution
   reroute sync --dry-run [--json]  Inspect local sync scope only; no daemon/cloud/writes
   reroute dev [--port N] -- COMMAND [ARGS...]
@@ -43,8 +50,8 @@ See README.md and docs/HARNESSES.md before using an agent integration.
 function parse(args) {
     const boundary = args.indexOf('--'), before = boundary < 0 ? args : args.slice(0, boundary);
     const flags = {}, positionals = [];
-    const values = new Set(['provider', 'host', 'harness', 'install-sdk', 'timeout-ms', 'port']);
-    const booleans = new Set(['fix', 'probe', 'destroy', 'accept-local', 'new-identity', 'no-adapters', 'allow-codex-hook', 'follow', 'json', 'dry-run', 'help']);
+    const values = new Set(['provider', 'host', 'harness', 'install-sdk', 'timeout-ms', 'port', 'tasks']);
+    const booleans = new Set(['fix', 'probe', 'destroy', 'accept-local', 'new-identity', 'no-adapters', 'allow-codex-hook', 'follow', 'json', 'dry-run', 'help', 'allow-paid', 'revoke-paid', 'live', 'non-interactive']);
     for (let i = 0; i < before.length; i++) {
         const item = before[i];
         if (!item.startsWith('--')) {
@@ -100,12 +107,12 @@ async function native(argv, env) {
     });
 }
 function localEnv() { return { ...process.env, PATH: unshimmedPath(process.env.PATH, join(home(), 'shims')), REROUTE_LOCAL: '1' }; }
-async function runRemote(argv, timeoutMs) {
+async function runRemote(argv, timeoutMs, explicit = true) {
     invariant(argv.length > 0, 'USAGE', 'Provide a command after --');
     const state = await findProject(process.cwd());
     invariant(state?.enabled, 'NOT_ENABLED', 'Run reroute enable first. reroute local -- COMMAND is the explicit local override.');
     const config = await loadConfig(state.project.root, { ...state.override, provider: state.provider });
-    const result = await remoteRun({ cwd: process.cwd(), argv, env: selectedEnvironment(process.env, config.routing.envAllow), timeoutMs });
+    const result = await remoteRun({ cwd: process.cwd(), argv, env: selectedEnvironment(process.env, config.routing.envAllow), timeoutMs, explicit });
     return result.timedOut ? 124 : result.cancelled ? 130 : result.code;
 }
 async function hook(host) {
@@ -129,8 +136,16 @@ async function hook(host) {
 export async function main(args = process.argv.slice(2)) {
     let op = args[0];
     try {
-        if (!op || op === '--help' || op === '-h') {
+        if (op === '--help' || op === '-h') {
             print(HELP);
+            return;
+        }
+        if (!op)
+            op = 'status';
+        const internal = new Set(['setup', 'uninstall', 'enable', 'disable', 'status', 'doctor', 'explain', 'exec', 'local', 'start', 'stop', 'sync', 'artifacts', 'dev', 'providers', 'auth', 'logs', 'daemon', 'shell', 'hook', 'shim']);
+        if (!internal.has(op) && !op.startsWith('-')) {
+            invariant(/^[A-Za-z0-9_+./-]+$/.test(op), 'USAGE', 'Use reroute exec -- COMMAND for explicit argv; shorthand is not a shell script');
+            process.exitCode = await runRemote(args);
             return;
         }
         if (op === '--version' || op === '-v') {
@@ -154,7 +169,7 @@ export async function main(args = process.argv.slice(2)) {
                 return;
             }
             const config = await loadConfig(state.project.root, { ...state.override, provider: state.provider });
-            process.exitCode = route(argv, config.routing.commands) === 'local' ? await native(argv, localEnv()) : await runRemote(argv);
+            process.exitCode = route(argv, config.routing.commands, config.routing) === 'local' ? await native(argv, localEnv()) : await runRemote(argv, undefined, false);
             return;
         }
         const p = parse(args.slice(1)), flags = p.flags, cwd = process.cwd();
@@ -162,35 +177,48 @@ export async function main(args = process.argv.slice(2)) {
             print(HELP);
             return;
         }
+        if (flags['allow-paid'] || flags['revoke-paid'])
+            invariant(op === 'setup' || op === 'enable', 'USAGE', 'Paid authorization belongs to setup/enable, not execution or inspection');
+        if (flags.destroy)
+            invariant(op === 'stop', 'USAGE', '--destroy is only valid with stop');
+        if (['setup', 'enable', 'uninstall', 'status', 'stop', 'start', 'disable', 'providers', 'artifacts', 'doctor', 'logs'].includes(op))
+            invariant(p.positionals.length === 0 && p.command.length === 0, 'USAGE', `${op} does not accept a program. Internal commands take priority; use reroute exec -- PROGRAM for a name collision.`);
         switch (op) {
             case 'setup':
             case 'uninstall': {
                 const selected = typeof flags.harness === 'string' ? flags.harness.split(',') : undefined;
-                invariant(!selected || selected.every(x => HARNESSES.includes(x)), 'USAGE', 'Unknown harness');
+                invariant(!selected || selected.every(x => HARNESSES.includes(x) || (op === 'uninstall' && x === 'omp')), 'USAGE', 'Unknown harness');
                 if (op === 'uninstall') {
                     print(await uninstall({ harnesses: selected }));
                     return;
                 }
-                print(await setup({ harnesses: selected, install: flags['install-sdk'], skipAdapters: flags['no-adapters'] === true, allowCodexHook: flags['allow-codex-hook'] === true }));
+                if (process.stdin.isTTY && process.stdout.isTTY && !flags['non-interactive'] && !flags.json) {
+                    const { setupWizard } = await import('./wizard.js');
+                    if (!(await setupWizard(cwd, flags))) {
+                        process.exitCode = 130;
+                        return;
+                    }
+                }
+                // Validate project choices before installing any explicitly selected adapter.
+                const configureProject = !!(flags.provider || flags.host || flags.tasks);
+                if (flags.tasks && !flags.provider && !flags.host)
+                    invariant(await findProject(cwd), 'USAGE', 'Select --provider PROVIDER (and --host ALIAS for SSH) before setting --tasks');
+                if (configureProject)
+                    await projectConfiguration(cwd, flags);
+                const report = await setup({ harnesses: selected, install: flags['install-sdk'], skipAdapters: flags['no-adapters'] === true, allowCodexHook: flags['allow-codex-hook'] === true });
+                const project = configureProject ? await enableProject(cwd, flags) : { enabled: (await findProject(cwd))?.enabled ?? false, next: 'reroute setup --provider ssh --host ALIAS (or --provider daytona)' };
+                print({ ...report, project, next: 'reroute; reroute cargo test; reroute stop' });
                 return;
             }
             case 'enable': {
-                const root = await projectRoot(cwd);
-                const old = flags['new-identity'] ? undefined : await findProject(cwd);
-                let override = old?.override ?? {};
-                if (flags.host)
-                    override = merge(override, { providers: { ssh: { host: flags.host } } });
-                const config = await loadConfig(root, { ...override, ...(flags.provider ? { provider: flags.provider } : old ? { provider: old.provider } : flags.host ? { provider: 'ssh' } : {}) });
-                await installShims(config.routing.commands);
-                const state = await request({ op: 'enable', cwd, provider: config.provider, override, fresh: flags['new-identity'] === true });
-                print({ enabled: true, provider: config.provider, project: state.project.id, note: 'Next intercepted runtime command will execute remotely. Restart your harness after initial setup.' });
+                print(await enableProject(cwd, flags));
                 return;
             }
             case 'explain': {
                 invariant(p.command.length > 0 && p.command.every(x => !x.includes('\0')), 'USAGE', 'Provide a command after --');
                 const state = await findProject(cwd), root = state?.project.root ?? await projectRoot(cwd);
                 const config = await loadConfig(root, state ? { ...state.override, provider: state.provider } : {});
-                const policy = routingDecision(p.command, config.routing.commands);
+                const policy = routingDecision(p.command, config.routing.commands, config.routing);
                 const intercepted = !/[\\/]/.test(p.command[0]) && config.routing.commands.includes(policy.executable);
                 const override = process.env.REROUTE_LOCAL === '1' ? 'explicit-local' : process.env.REROUTE_REMOTE === '1' ? 'already-remote' : undefined;
                 const reason = override ?? (!state?.enabled ? 'project-not-enabled' : !intercepted ? 'not-intercepted-by-path-shim' : policy.rule);
@@ -199,7 +227,8 @@ export async function main(args = process.argv.slice(2)) {
                     projectRoot: root, enabled: state?.enabled ?? false, provider: config.provider,
                     policyRoute: policy.route, matchedRule: policy.rule, intercepted,
                     route: !override && state?.enabled && intercepted ? policy.route : 'local', reason,
-                    remoteReadiness: 'UNVERIFIED',
+                    remoteReadiness: 'UNVERIFIED', policyMode: config.routing.mode ?? 'tasks',
+                    migration: config.routing.mode === 'legacy' ? 'Legacy executable policy retained. Set routing.mode = "tasks" and use exact local/remote argv prefixes to migrate.' : undefined,
                     limitations: [
                         'Only PATH shim lookup in an activated shell is modeled; absolute/relative executable paths and overridden PATH bypass shims.',
                         'Shell wrappers, aliases, package script bodies and nested commands are not parsed; a remote script can run Git/publish/deploy remotely.',
@@ -250,11 +279,23 @@ export async function main(args = process.argv.slice(2)) {
                 process.exitCode = report.readiness.ready ? 0 : 65;
                 return;
             }
+            case 'status': {
+                const report = { ...await localStatus(cwd), ...(flags.live ? await runtimeStatus(cwd) : {}) };
+                print(flags.json ? report : [`Project: ${report.project?.root ?? cwd} (${report.enabled ? 'enabled' : 'disabled'})`, `Provider: ${report.provider ?? 'not configured'}; runtime: ${report.runtime ?? 'not created'}; remote state: ${report.status}`, `Tasks: ${report.active ?? 'UNKNOWN'}; sync pending: ${report.syncPending === true ? 'YES — run reroute sync' : 'no recorded pending source'}`, `Coordinator: ${report.coordinator}; paid authorization: ${report.paidAuthorized ? 'yes / not required for SSH' : 'not granted'}; billing: UNKNOWN`, ...(report.warning ? [`Attention: ${report.warning}`] : []), `Next: ${report.enabled ? 'reroute cargo test | reroute sync | reroute stop' : 'reroute setup --provider ssh --host ALIAS (or --provider daytona)'}`].join('\n'));
+                return;
+            }
+            case 'artifacts':
+                print(await request({ op, cwd }));
+                return;
+            case 'stop': {
+                const before = await findProject(cwd);
+                await request({ op, cwd, destroy: flags.destroy === true });
+                print({ provider: before?.provider, runtime: before?.runtime?.id, action: !before?.runtime ? 'no-recorded-runtime' : flags.destroy ? 'native-destroy-confirmed' : 'native-stop-policy-confirmed', syncPending: (await findProject(cwd))?.syncPending === true, billing: 'UNKNOWN', note: before?.provider === 'ssh' ? (flags.destroy ? 'Only the verified Reroute workspace directory was removed; SSH host stays running.' : 'SSH work/tunnels stopped; the host and workspace remain.') : 'Native runtime operation completed. Retained disks/volumes/archives may still incur charges; verify native resources and billing. No zero-cost guarantee.' });
+                return;
+            }
             case 'disable':
             case 'start':
-            case 'stop':
-            case 'status':
-                print(await request({ op, cwd, destroy: flags.destroy === true, acceptLocal: flags['accept-local'] === true }));
+                print(await request({ op, cwd }));
                 return;
             case 'doctor':
                 print(await doctor(cwd, flags.fix === true, flags.probe === true));
@@ -265,7 +306,7 @@ export async function main(args = process.argv.slice(2)) {
             case 'auth':
                 if (p.positionals[0] === 'reload') {
                     await reloadDaemon();
-                    print(await setup({ skipAdapters: true }));
+                    print({ ...await setup({ skipAdapters: true }), daemon: await request({ op: 'ping' }, false) });
                 }
                 else
                     print(await authStatus());
