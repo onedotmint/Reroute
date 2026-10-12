@@ -1,8 +1,4 @@
 import * as sdk from '@earendil-works/pi-coding-agent';
-import * as tui from '@earendil-works/pi-tui';
-import { registerPi } from './pi.mjs';
-
-// Static imports are resolved by Pi's loader, not a second local SDK installation.
-export default function reroute(pi: sdk.ExtensionAPI) {
-  registerPi(pi, sdk, tui);
-}
+import { registerPi } from '../dist/pi.js';
+// Pi's own loader resolves the host SDK; no second agent runtime is launched.
+export default function reroute(pi: sdk.ExtensionAPI) { registerPi(pi, sdk); }

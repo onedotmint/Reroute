@@ -4,7 +4,7 @@ on:
     branches: [rebuild/0.3-native]
     paths: [.github/workflows/rebuild-workbench.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -13,29 +13,34 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Assemble isolated development tools and reference source
+      - name: Lock dependencies on the authorized rebuild branch only
         run: |
           set -eu
-          mkdir -p /tmp/workbench/deps /tmp/workbench/refs
+          test "$GITHUB_REF" = refs/heads/rebuild/0.3-native
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'build: lock native SDK and verification dependencies'
+            git push origin HEAD:refs/heads/rebuild/0.3-native
+          fi
+      - name: Assemble offline verification tools (no cloud credentials)
+        run: |
+          set -eu
+          npm ci --ignore-scripts --no-audit --no-fund
+          mkdir -p /tmp/workbench/npm-cache
+          cp "$(command -v node)" /tmp/workbench/node
+          cp -a "$HOME/.npm/_cacache" /tmp/workbench/npm-cache/
           git bundle create /tmp/workbench/repository.bundle --all
-          cd /tmp/workbench/deps
-          npm init -y >/dev/null
-          npm install --save-exact --ignore-scripts --no-audit --no-fund typescript@5.9.3 @types/node@22 @clack/prompts shell-quote @types/shell-quote ignore @daytona/sdk e2b modal @earendil-works/pi-coding-agent
-          cd /tmp/workbench/refs
-          git clone --depth 1 https://github.com/earendil-works/pi.git pi
-          git clone --depth 1 https://github.com/remote-cli/remote.git remote
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/skypilot-org/skypilot.git sky
-          git -C sky sparse-checkout set sky/cli.py sky/client/sdk.py LICENSE --skip-checks
-          for name in pi remote sky; do git -C "$name" rev-parse HEAD > "$name.commit"; rm -rf "$name/.git"; done
-          cd /tmp/workbench
-          tar -czf /tmp/reroute-workbench.tgz repository.bundle deps refs
+          cp package-lock.json /tmp/workbench/package-lock.json
+          tar -czf /tmp/reroute-workbench.tgz -C /tmp/workbench .
       - uses: actions/upload-artifact@v4
         with:
-          name: reroute-workbench
+          name: reroute-workbench-node-cache
           path: /tmp/reroute-workbench.tgz
           retention-days: 2
           if-no-files-found: error

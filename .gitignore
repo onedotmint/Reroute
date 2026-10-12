@@ -1,13 +1,8 @@
-node_modules/
+node_modules
+dist/
 .tools/
-.reroute/
-.env
-.env.*
+.artifacts/
 *.tgz
-*.zip
-*.log
-coverage/
-
-# Local-only raw benchmark evidence; the indexed measurements in
-# docs/verification/ROUND5-SYNC-PERFORMANCE.json are the committed record.
-verification/ROUND5-RAW-EVIDENCE.tar.gz
+.reroute.json
+.reroute/
+.env*
