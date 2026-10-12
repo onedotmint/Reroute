@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { credentialsFor } from '../auth.js';
 import type { Profile, Provider, ExecOptions, ExecResult } from '../types.js';
 export class DaytonaProvider implements Provider {
   readonly stdin = false;
@@ -6,7 +7,10 @@ export class DaytonaProvider implements Provider {
   private sandbox?: import('@daytona/sdk').Sandbox;
   constructor(readonly profile: Profile, private readonly load = () => import('@daytona/sdk')) {}
   private async lookup(): Promise<import('@daytona/sdk').Sandbox> {
-    this.client ??= new (await this.load()).Daytona();
+    if (!this.client) {
+      const secrets = await credentialsFor('daytona');
+      this.client = new (await this.load()).Daytona({ ...(secrets.DAYTONA_API_KEY ? { apiKey: secrets.DAYTONA_API_KEY } : {}) });
+    }
     return this.client.get(this.profile.id);
   }
   async status(): Promise<string> { const state = (await this.lookup()).state; return state === 'started' ? 'running' : String(state); }

@@ -3,16 +3,18 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Profile, Provider, ExecOptions, ExecResult } from '../types.js';
 import { feedInput } from '../util.js';
+import { credentialsFor } from '../auth.js';
 export class E2BProvider implements Provider {
   readonly stdin = true;
   private sandbox?: import('e2b').Sandbox;
   constructor(readonly profile: Profile, private readonly load: () => Promise<Pick<typeof import('e2b'), 'Sandbox' | 'CommandExitError'>> = () => import('e2b')) {}
-  async status(): Promise<string> { return (await (await this.load()).Sandbox.getInfo(this.profile.id, { requestTimeoutMs: 15000 })).state; }
+  private async auth() { const s = await credentialsFor('e2b'); return s.E2B_API_KEY ? { apiKey: s.E2B_API_KEY } : {}; }
+  async status(): Promise<string> { return (await (await this.load()).Sandbox.getInfo(this.profile.id, { ...await this.auth(), requestTimeoutMs: 15000 })).state; }
   private async running(): Promise<import('e2b').Sandbox> {
     if (!this.sandbox) {
       if (await this.status() !== 'running') throw new Error('E2B is not running. Resume explicitly with reroute resource resume --yes --allow-cost');
       // connect can resume a sandbox; it is never called from status, stop, or destroy.
-      this.sandbox = await (await this.load()).Sandbox.connect(this.profile.id, { requestTimeoutMs: 15000 });
+      this.sandbox = await (await this.load()).Sandbox.connect(this.profile.id, { ...await this.auth(), requestTimeoutMs: 15000 });
     }
     return this.sandbox;
   }
@@ -31,8 +33,8 @@ export class E2BProvider implements Provider {
   async get(remote: string, local: string): Promise<void> { const stream = await (await this.running()).files.read(remote, { format: 'stream', requestTimeoutMs: 120000 }); await pipeline(Readable.fromWeb(stream as import('node:stream/web').ReadableStream<Uint8Array>), createWriteStream(local, { flags: 'wx', mode: 0o600 })); }
   async lifecycle(action: 'stop' | 'resume' | 'destroy'): Promise<void> {
     const { Sandbox } = await this.load();
-    if (action === 'resume') { this.sandbox = await Sandbox.connect(this.profile.id, { requestTimeoutMs: 60000 }); return; }
-    const result = action === 'stop' ? await Sandbox.pause(this.profile.id, { requestTimeoutMs: 60000 }) : await Sandbox.kill(this.profile.id, { requestTimeoutMs: 60000 });
+    if (action === 'resume') { this.sandbox = await Sandbox.connect(this.profile.id, { ...await this.auth(), requestTimeoutMs: 60000 }); return; }
+    const result = action === 'stop' ? await Sandbox.pause(this.profile.id, { ...await this.auth(), requestTimeoutMs: 60000 }) : await Sandbox.kill(this.profile.id, { ...await this.auth(), requestTimeoutMs: 60000 });
     this.sandbox = undefined;
     if (!result && action === 'stop') throw new Error('E2B pause was not confirmed');
   }

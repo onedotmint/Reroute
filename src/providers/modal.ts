@@ -1,11 +1,19 @@
 import { feedInput } from '../util.js';
+import { credentialsFor } from '../auth.js';
 import type { Profile, Provider, ExecOptions, ExecResult } from '../types.js';
 export class ModalProvider implements Provider {
   readonly stdin = true;
   private client?: import('modal').ModalClient;
   private sandbox?: import('modal').Sandbox;
   constructor(readonly profile: Profile, private readonly load = () => import('modal')) {}
-  private async api(): Promise<import('modal').ModalClient> { return this.client ??= new (await this.load()).ModalClient({ timeoutMs: 15000, maxRetries: 0 }); }
+  private async api(): Promise<import('modal').ModalClient> {
+    if (!this.client) {
+      const secrets = await credentialsFor('modal');
+      this.client = new (await this.load()).ModalClient({ timeoutMs: 15000, maxRetries: 0,
+        ...(secrets.MODAL_TOKEN_ID && secrets.MODAL_TOKEN_SECRET ? { tokenId: secrets.MODAL_TOKEN_ID, tokenSecret: secrets.MODAL_TOKEN_SECRET } : {}) });
+    }
+    return this.client;
+  }
   private async lookup(): Promise<import('modal').Sandbox> { return this.sandbox ??= await (await this.api()).sandboxes.fromId(this.profile.id); }
   async status(): Promise<string> { return await (await this.lookup()).poll() === null ? 'running' : 'stopped'; }
   async exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
