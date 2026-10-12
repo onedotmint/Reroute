@@ -4,31 +4,56 @@
 
 Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands stay local. Failed remote jobs never silently retry locally.
 
-**Status:** 0.3.0-native.3 candidate. SSH is tested through real OpenSSH and rsync on an isolated Ubuntu localhost server in CI. Other cloud providers are implemented and contract-tested, but their real account integrations are **LIVE UNVERIFIED**.
+**Status:** 0.3.0-native.4 candidate. SSH is tested through real OpenSSH and rsync on an isolated Ubuntu localhost server in CI. Other cloud providers are implemented and contract-tested, but their real account integrations are **LIVE UNVERIFIED**.
 
-## Install on Windows 11 + WSL2
+## Install as a native Pi PROJECT package (recommended)
 
-Requirements: run inside **WSL2** with Node.js >=22.19, Git, Bash, Pi, and an already configured Linux compute resource.
-
-1. Open [GitHub Actions: Verify native Reroute](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml). Choose a **successful** run on branch `rebuild/0.3-native`.
-2. Download its `reroute-npm-node-22-<sha>` (or Node 24) artifact; unzip and locate `reroute-0.3.0-native.3.tgz`. The artifact also includes a commit SHA and test evidence.
-3. From a WSL shell run:
+Reroute now relies on **Pi's own package manager**. From your WSL2 project (Pi and Node.js >= 22.19 required):
 
 ~~~bash
-npm install -g ./reroute-0.3.0-native.3.tgz
-cd /path/to/your/project
+cd /path/to/your-project
+pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native
+pi
+~~~
+
+Approve **Pi project trust** after reviewing this package. Inside Pi, run `/reroute`, choose **Configure this project**, then choose SSH / Daytona / SkyPilot / Modal / E2B and an existing target. Reroute saves `.reroute.json` in this project. Other projects do not load the extension.
+
+Pi now owns the installation record at **`.pi/settings.json`**, source checkout, loading, updating and removal. There is no custom entry under `~/.pi/agent/extensions/` and no global Node or Pi installation required. A Pi project package is not loaded before the user trusts the folder.
+
+~~~bash
+pi list
+pi update --extensions
+pi remove -l git:github.com/onedotmint/Reroute@rebuild/0.3-native
+~~~
+
+For noninteractive inspections, `pi list --approve` explicitly permits reading trusted project settings; `pi list --no-approve` intentionally hides them. Global Pi installation is available by **omitting `-l`**, but project-only is the default recommendation.
+
+The Git checkout does not need a built `dist/`: Pi's native TypeScript loader loads `adapters/pi.ts` and the source modules directly. A local checked-out source directory is also a native Pi package: `pi install -l /absolute/path/to/Reroute`.
+
+**Important:** Reroute is **not published to npm** yet. Do not use `pi install -l npm:reroute`. The Git ref above is the supported native package source. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `reroute-0.3.0-native.4.tgz` for the **optional standalone CLI**.
+
+### Optional CLI and masked API keys
+
+The `/reroute` Pi screen can create, inspect and edit project profiles without the CLI. For Daytona / Modal / E2B credentials, prefer each provider's native environment or authentication. **Pi's text inputs are not masked**: never type API keys into an ordinary Pi input prompt.
+
+For masked API-key entry, read-only resource discovery and advanced diagnostics, install the optional CLI tarball from a successful GitHub Actions run:
+
+~~~bash
+npm install -g ./reroute-0.3.0-native.4.tgz
+cd /path/to/your-project
 reroute setup
-reroute doctor
 reroute doctor --connect
 ~~~
 
-`reroute setup` saves the project's `.reroute.json` and writes one owned Pi extension entry into `~/.pi/agent/extensions/reroute.ts` (or `$PI_CODING_AGENT_DIR/extensions/reroute.ts`). Existing unowned extensions are **not overwritten**. Run `/reload` if Pi is already open, then `/reroute`. This is a native TUI menu; viewing the panel does not use a model or create billable resources.
+The standalone CLI manages only `.reroute.json` and the opt-in private credentials file. It **does not register a Pi extension or modify Pi settings**. Pi installs and removes its native package itself.
 
-Alternatively, build from the GitHub branch with `npm ci && npm run build && npm pack`.
+### Migrating from the earlier handwritten extension
+
+Earlier Reroute candidates installed `~/.pi/agent/extensions/reroute.ts` globally. Before enabling the new native package, inspect that file. **Only remove it if its first line is `// Reroute v3 owned extension entry`**; leave unowned or modified files untouched. The new installer does not delete any global extensions automatically. Duplicate global/project registration could cause conflicts.
 
 ## Friendly setup and Pi control panel
 
-Run `reroute setup` in any project. The Clack wizard guides you through five choices (SSH, Daytona, SkyPilot, Modal, E2B), detects native/environment credentials, and optionally prompts for masked cloud API keys. It then offers a **read-only** list of existing hosts, clusters or Sandboxes; choose an existing item or type its ID yourself. The final optional connection check is explicit and never provisions/resumes compute.
+The optional CLI command `reroute setup` guides you through five choices (SSH, Daytona, SkyPilot, Modal, E2B), detects native/environment credentials, and optionally prompts for masked cloud API keys. It then offers a **read-only** list of existing hosts, clusters or Sandboxes; choose an existing item or type its ID yourself. The final optional connection check is explicit and never provisions/resumes compute.
 
 Cloud credentials are read from each provider's native environment/configuration first. For users who explicitly choose **Save locally**, Reroute stores keys outside the project in `~/.config/reroute/credentials.json` (or `$XDG_CONFIG_HOME/reroute/credentials.json`), with a private 0700 folder and 0600 file. This is **not an encrypted keychain**; use environment variables/native CLI authentication instead if preferable. API keys never appear in `.reroute.json`, the wizard's review, or Pi panel labels. Reroute passes saved credentials directly to official SDKs without adding them to global environment variables.
 
@@ -37,7 +62,7 @@ reroute credentials                                  # sources only; never print
 reroute credentials forget --provider daytona --yes   # forget saved Daytona key only
 ~~~
 
-Run `reroute setup` again to add or edit another named profile. Project profiles are shared by CLI and Pi; existing profiles are preserved. Credential/resource checks are not evidence that a paid cloud account was live-tested in CI.
+Use `/reroute` to add/edit profiles in Pi, or rerun the optional `reroute setup` CLI wizard. Both use the same project configuration. Credential/resource checks are not evidence that a paid cloud account was live-tested in CI.
 
 In Pi, `/reroute` immediately shows the **active profile, provider, resource ID, routing mode, credential source and configured profiles**. Choose **Overview** for all local profiles and recent task counts. **Manage providers** can add/edit/switch/forget local profiles and explicitly discover existing resources; **Credentials** shows safe status, explains masked CLI onboarding, or forgets a locally stored key. **Check connection** is opt-in; opening the panel does not contact remote APIs, resume compute, or use a model. Resource lifecycle actions continue to require explicit confirmation and can incur charges.
 

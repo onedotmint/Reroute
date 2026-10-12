@@ -2,7 +2,7 @@
 
 **Canonical source:** [rebuild/0.3-native](https://github.com/onedotmint/Reroute/tree/rebuild/0.3-native); main and the original 0.2 branch are unchanged. The precise final commit SHA is recorded in each successful CI archive's `COMMIT.txt` / `package-verification.json`, and in the GitHub run's head SHA. Always match those values to the requested source ref. This versioned ledger does not falsely describe an older checkpoint as the final SHA.
 
-**Build:** npm version `0.3.0-native.3`, `npm pack` to `reroute-0.3.0-native.3.tgz`. CI runs locked `npm ci`, strict types/build, tests, real localhost SSH, benchmark, real pack + clean-prefix install/smoke, then uploads the tarball and evidence as `reroute-npm-node-<node>-<sha>`, retention 30 days. No npm publish or GitHub Release.
+**Build:** npm version `0.3.0-native.4`, `npm pack` to `reroute-0.3.0-native.4.tgz`. CI runs locked `npm ci`, strict types/build, tests, real localhost SSH, benchmark, real pack + clean-prefix install/smoke, then uploads the tarball and evidence as `reroute-npm-node-<node>-<sha>`, retention 30 days. No npm publish or GitHub Release.
 
 **Architecture removal (0.2 → 0.3):** removed resident daemon, generic multi-way synchronization and source writeback, merge conflict states, remote dev server/preview, unrelated adapters and legacy protocol. Retained the usable idea of a native Pi Bash interface, Clack setup, conservative command classification, direct compute providers; rebuilt one-way snapshots and a small task supervisor. Uses OpenSSH, rsync, official Daytona/Modal/E2B SDKs, SkyPilot CLI, Pi SDK and TypeScript; no LLM client.
 
@@ -12,6 +12,16 @@
 - Pi `/reroute` displays active resource, provider, routing, credential availability and all configured profiles without making remote calls. Overview, profile add/edit/switch/forget, opt-in resource discovery, credential status/forget, recent jobs, and explicit resource lifecycle operations are available.
 - Non-interactive CLI `reroute credentials` and `reroute credentials forget --provider ... --yes` inspect and remove private-file entries; no keys are printed and provider-issued tokens are not revoked.
 - Tests cover real Clack PTY interaction/masking, private file ownership and permissions, SDK authentication fallback, Pi menu contracts and existing SSH integration. **An interactive Pi terminal in a user's WSL2 is still NOT VERIFIED.**
+
+## Native Pi package implementation
+
+- Project install: `pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native` via Pi's actual package manager. Project settings are in `.pi/settings.json` and project trust gates extension loading.
+- The Pi adapter now loads source `src/pi.ts` with Pi's own TypeScript loader; a Git package clone does not need generated `dist/`.
+- `reroute setup` configures the project's `.reroute.json` only; global `installPi` entry-writing was removed. The old `reroute pi install` subcommand is intentionally retired.
+- First `/reroute` invocation in an unconfigured trusted project can create the project's first provider profile. Provider keys must not be entered into unmasked Pi text inputs; masked credential entry remains available via the optional standalone CLI.
+- Automated acceptance includes source-only Pi loading (without `dist/`), real Pi CLI project-local package install/trust/uninstall tests, and on GitHub branch pushes a full native Pi Git-install smoke test of the exact commit. No user home settings or global extensions are changed in these tests.
+- An earlier owned global extension must be reviewed and manually retired to prevent duplicate registration; nothing deletes unknown Pi extensions automatically.
+- **Manual WSL2 interactive acceptance and all live paid cloud integrations remain unverified.**
 
 ## Verified versus unverified
 
@@ -35,4 +45,4 @@
 
 **Known limits:** input snapshots are double-checked but not filesystem-atomic; Git index capture is capped at 1 MiB, total input at 512 MiB, each file at 256 MiB; artifact archive at 256 MiB. Symlink inputs rejected. Shared project execution is serialized. Cancellation or transport state can be unknown and is never reported as confirmed success. SSH host lifecycle is not supported. Per-provider live SDK/CLI behavior is still a validation gap.
 
-**Recovery/install:** checkout the branch or use the actual successful [Verify native Reroute Actions run](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml). Download a `reroute-npm-node-<node>-<sha>` artifact, unzip, compare `COMMIT.txt` with run head SHA, install `npm install -g ./reroute-0.3.0-native.3.tgz` inside WSL2, run `reroute setup` and `reroute doctor --connect` in the project, restart Pi and try `/reroute`. Always report missing/failed CI or live checks as such; no substitute fake tarballs.
+**Recovery/install:** use `pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native`, trust the project in Pi, and run `/reroute` to configure the project. For the optional standalone CLI, checkout the branch or use the actual successful [Verify native Reroute Actions run](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml). Download a `reroute-npm-node-<node>-<sha>` artifact, unzip, compare `COMMIT.txt` with run head SHA, install `npm install -g ./reroute-0.3.0-native.4.tgz` inside WSL2, run `reroute setup` and `reroute doctor --connect` in the project. CLI setup does not install the Pi extension; Pi does so separately. Always report missing/failed CI or live checks as such; no substitute fake tarballs.
