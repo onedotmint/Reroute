@@ -64,7 +64,7 @@ reroute credentials forget --provider daytona --yes   # forget saved Daytona key
 
 Use `/reroute` to add/edit profiles in Pi, or rerun the optional `reroute setup` CLI wizard. Both use the same project configuration. Credential/resource checks are not evidence that a paid cloud account was live-tested in CI.
 
-In Pi, `/reroute` immediately shows the **active profile, provider, resource ID, routing mode, credential source and configured profiles**. Choose **Overview** for all local profiles and recent task counts. **Manage providers** can add/edit/switch/forget local profiles and explicitly discover existing resources; **Credentials** shows safe status, explains masked CLI onboarding, or forgets a locally stored key. **Check connection** is opt-in; opening the panel does not contact remote APIs, resume compute, or use a model. Resource lifecycle actions continue to require explicit confirmation and can incur charges.
+In Pi, `/reroute` shows the **active profile, provider, resource ID, routing mode and credential availability**. **Overview** lists local profiles and recent task counts; **Manage providers** adds/edits/switches/forgets profiles and explicitly discovers existing resources. **Advanced** holds credential-key removal and all stop/resume/destroy resource operations, with explicit confirmation. **Check connection** is opt-in. Opening the panel does not contact cloud APIs, resume compute, or use a model.
 
 ## Provider prerequisites
 
@@ -78,7 +78,7 @@ All targets must already exist and provide Linux, Python 3, Bash, a /proc filesy
 | Modal | SDK credentials, existing Sandbox ID, existing app name for snapshot stop/resume | JS SDK Sandbox API; resume may create a different billable Sandbox |
 | E2B | SDK credentials and existing running Sandbox ID | Official SDK command/file APIs; resume/pause/kill only via explicit controls |
 
-Cloud versions and account policies change; contract tests are **not** live account tests. The four non-SSH integrations are currently **LIVE UNVERIFIED**. Explicit resume can incur charges.
+**Support policy:** SSH has real localhost OpenSSH integration evidence. Daytona, SkyPilot, Modal and E2B are **experimental / LIVE UNVERIFIED**, not production-qualified; they retain their current adapters without further feature expansion until existing-resource live tests pass. Cloud SDK/CLI contracts may change. Explicit resume can incur charges.
 
 ## Everyday commands
 

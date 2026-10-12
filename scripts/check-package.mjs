@@ -13,13 +13,19 @@ const clean=await mkdtemp(join(tmpdir(),'reroute-install-'));
 try {
  const tarball=join(output,pack.filename);
  // A true clean prefix install from the produced tarball, not a source-tree import.
+ const started=performance.now();
  run('npm',['install','--prefix',clean,'--omit=dev','--ignore-scripts','--no-audit','--no-fund',tarball]);
+ const installMs=Math.round(performance.now()-started);
+ // Disk usage is Linux filesystem allocation including all installed production packages.
+ // CI has warm npm caches; installMs is a CI diagnostic, not a WSL2 latency claim.
+ const nodeModulesKiB=Number(run('du',['-sk',join(clean,'node_modules')]).trim().split(/\s+/)[0]);
+ assert.ok(Number.isSafeInteger(nodeModulesKiB)&&nodeModulesKiB>0);
  const installed=join(clean,'node_modules','reroute','bin','reroute.mjs');
  run(process.execPath,[resolve('tests/smoke.mjs'),installed]);
  const pkg=JSON.parse(await readFile(join(clean,'node_modules','reroute','package.json'),'utf8'));
  assert.equal(pkg.version,'0.3.0-native.4');
  const commit=process.env.GITHUB_SHA??run('git',['rev-parse','HEAD']).trim();
  await writeFile(join(output,'COMMIT.txt'),commit+'\n');
- await writeFile(join(output,'package-verification.json'),JSON.stringify({commit,version:pkg.version,tarball:pack.filename,integrity:pack.integrity,shasum:pack.shasum,packageBytes:pack.size,unpackedBytes:pack.unpackedSize,cleanInstall:true,smoke:true,node:process.version},null,2)+'\n');
- console.log(JSON.stringify({tarball:pack.filename,cleanInstall:true,commit}));
+ await writeFile(join(output,'package-verification.json'),JSON.stringify({commit,version:pkg.version,tarball:pack.filename,integrity:pack.integrity,shasum:pack.shasum,packageBytes:pack.size,unpackedBytes:pack.unpackedSize,cleanInstall:true,smoke:true,node:process.version,installMetrics:{installMs,nodeModulesKiB,method:'clean-prefix npm install --omit=dev; CI runner, possibly warm npm cache'}},null,2)+'\n');
+ console.log(JSON.stringify({tarball:pack.filename,cleanInstall:true,commit,installMs,nodeModulesKiB}));
 }finally{await rm(clean,{recursive:true,force:true});}

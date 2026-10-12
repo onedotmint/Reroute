@@ -23,6 +23,14 @@
 - An earlier owned global extension must be reviewed and manually retired to prevent duplicate registration; nothing deletes unknown Pi extensions automatically.
 - **Manual WSL2 interactive acceptance and all live paid cloud integrations remain unverified.**
 
+## 0.3 lightweight convergence (this branch)
+
+- Slimmed the Pi profile-management flow rather than adding another configuration service. Shared `validate`/`saveConfig` remain the sole configuration validation/persistence path; both Clack onboarding and Pi use the same project configuration. The masked credential wizard is kept separate because Pi text inputs are not masked.
+- Main `/reroute` menu now contains everyday overview, providers, routing mode, connection check and jobs; lifecycle stop/resume/destroy and key removal moved to **Advanced**. No resource is accessed merely by opening a menu; each potentially costly/destructive action still requires consent.
+- Canceled Pi field editing leaves the existing saved profile untouched; new tests cover cancel, provider switching and Advanced confirmation.
+- Cloud provider expansion frozen until independent real-account tests. Daytona/SkyPilot/Modal/E2B remain **experimental and LIVE UNVERIFIED**, not removed or silently disabled.
+- The existing clean-prefix npm package check now records `installMs` and `nodeModulesKiB` in `package-verification.json`, providing a measured baseline instead of guessing WSL2 disk usage. Timing includes CI environment effects and is not a performance promise.
+
 ## Verified versus unverified
 
 | Area | Current evidence |

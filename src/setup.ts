@@ -48,7 +48,7 @@ export async function setup(cwd: string, options: SetupOptions = {}): Promise<Co
       options:PROVIDERS.map(value=>({value,label:value.toUpperCase() === 'SSH' ? 'SSH' : value === 'e2b' ? 'E2B' : value === 'skypilot' ? 'SkyPilot' : value === 'daytona' ? 'Daytona' : 'Modal'}))}));
     if (picked !== profile.provider) profile = {};
     profile.provider = picked;
-    p.note(guides[picked] + '\nListing an existing resource does not create or resume it.', 'Provider setup');
+    p.note(guides[picked] + (picked === 'ssh' ? '' : '\nEXPERIMENTAL: this provider has offline contract coverage, but no live account acceptance yet.') + '\nOnly existing compute is listed; nothing is created or resumed.', 'Provider setup');
     const authentication = await credentialStatus(picked);
     if (secretNames[picked].length) {
       p.note('Detected authentication: ' + authentication + '. Credentials never enter .reroute.json.\nAn available credential is not proof of a successful login.', 'Authentication');
