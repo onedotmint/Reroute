@@ -1,0 +1,304 @@
+"""One-shot Linux input verifier / process-group supervisor. No daemon or sync protocol.
+Files travel through rsync or the provider's filesystem API. Never copy source back.
+"""
+import base64
+import hashlib
+import json
+import os
+import pathlib
+import re
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tarfile
+import time
+
+
+def read(path):
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def write(path, value):
+    temp = str(path) + '.tmp-' + str(os.getpid())
+    with open(temp, 'x', encoding='utf-8') as f:
+        json.dump(value, f)
+    os.replace(temp, path)
+
+
+def safe(path):
+    if not isinstance(path, str) or not path or path.startswith('/') or '\\' in path or any(ord(c) < 32 or ord(c) == 127 for c in path) or any(p in ('', '.', '..') for p in path.split('/')):
+        raise ValueError('Unsafe input or artifact path')
+    return path
+
+
+def clean_path(path):
+    path = pathlib.Path(path)
+    for p in [path] + list(path.parents):
+        if p.is_symlink():
+            raise ValueError('Symlink path refused: ' + str(p))
+    return path
+
+
+def sha(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(262144), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def entries(directory):
+    found = {}
+    for folder, dirs, files in os.walk(directory, followlinks=False):
+        for name in dirs + files:
+            p = pathlib.Path(folder) / name
+            if p.is_symlink() or not (p.is_file() or p.is_dir()):
+                raise ValueError('Non-regular input/artifact: ' + str(p))
+        for name in files:
+            p = pathlib.Path(folder) / name
+            found[p.relative_to(directory).as_posix()] = p
+    return found
+
+
+def verify(directory, manifest):
+    actual = entries(directory)
+    if set(actual) != set(manifest):
+        raise ValueError('Incomplete or unexpected input files; execution refused')
+    for name, info in manifest.items():
+        p = actual[name]
+        if p.stat().st_size != info['size'] or sha(p) != info['sha256']:
+            raise ValueError('Input checksum mismatch: ' + name)
+        os.chmod(p, info['mode'] & 0o777)
+
+
+def proc(pid):
+    try:
+        s = pathlib.Path('/proc', str(pid), 'stat').read_text()
+        fields = s[s.rfind(')') + 2:].split()
+        return {'state': fields[0], 'group': int(fields[2]), 'start': fields[19]}
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+
+
+def group_alive(group):
+    for p in pathlib.Path('/proc').iterdir():
+        if p.name.isdigit():
+            s = proc(int(p.name))
+            if s and s['group'] == group and s['state'] not in ('Z', 'X'):
+                return True
+    return False
+
+
+def terminate_group(group):
+    for sig, delay in [(signal.SIGTERM, 1.0), (signal.SIGKILL, 2.0)]:
+        if not group_alive(group):
+            return True
+        try:
+            os.killpg(group, sig)
+        except ProcessLookupError:
+            return True
+        until = time.monotonic() + delay
+        while time.monotonic() < until:
+            if not group_alive(group):
+                return True
+            time.sleep(.05)
+    return not group_alive(group)
+
+
+def main(action, data):
+    root = clean_path(data['root'])
+    if not root.is_absolute() or root == pathlib.Path('/'):
+        raise ValueError('Absolute isolated workspace required')
+    if action == 'boot':
+        root.mkdir(parents=True, mode=0o700, exist_ok=True)
+        clean_path(root)
+        if root.stat().st_uid != os.getuid():
+            raise ValueError('Workspace belongs to a different user')
+        marker = root / '.reroute-v3'
+        if not marker.exists():
+            if any(root.iterdir()):
+                raise ValueError('Refusing to adopt a nonempty unmarked workspace')
+            try:
+                with open(marker, 'x') as f:
+                    f.write('reroute-v3\n')
+            except FileExistsError:
+                pass
+        if marker.read_text() != 'reroute-v3\n':
+            raise ValueError('Unknown workspace marker')
+        os.chmod(root, 0o700)
+        for folder in ['input', 'jobs', 'cache']:
+            (root / folder).mkdir(exist_ok=True, mode=0o700)
+        return {'ready': True}
+    if not (root / '.reroute-v3').is_file() or (root / '.reroute-v3').read_text() != 'reroute-v3\n':
+        raise ValueError('Not a Reroute v3 workspace')
+    identity = data['id']
+    if not re.fullmatch('[0-9a-f-]{36}', identity):
+        raise ValueError('Invalid task ID')
+    job = clean_path(root / 'jobs' / identity)
+    lock = root / 'lock'
+    receipt = job / 'receipt.json'
+
+    def unlock():
+        if lock.is_dir() and (lock / 'owner').read_text() == identity:
+            shutil.rmtree(lock)
+
+    def finish(status, code):
+        result = {'status': status, 'code': code, 'scope': 'process-group', 'finishedAt': time.time()}
+        write(receipt, result)
+        if status != 'unknown':
+            unlock()
+        return result
+
+    if action == 'acquire':
+        try:
+            lock.mkdir(mode=0o700)
+        except FileExistsError:
+            raise RuntimeError('BUSY: this project has an active or unresolved task; inspect reroute jobs')
+        (lock / 'owner').write_text(identity)
+        job.mkdir(mode=0o700)
+        return {'acquired': True}
+    if action == 'status':
+        if receipt.exists():
+            return read(receipt)
+        info = read(job / 'process.json') if (job / 'process.json').exists() else None
+        if info:
+            current = proc(info['supervisor'])
+            return {'status': 'running' if current and current['start'] == info['start'] and current['state'] not in ('Z','X') else 'unknown'}
+        return {'status': 'preparing' if job.exists() else 'unknown'}
+    if action == 'cancel':
+        if receipt.exists():
+            return read(receipt)
+        (job / 'cancel').touch(exist_ok=True)
+        until = time.monotonic() + 8
+        while time.monotonic() < until:
+            if receipt.exists():
+                return read(receipt)
+            time.sleep(.1)
+        return {'status': 'unknown', 'error': 'Cancellation requested, but termination is not confirmed'}
+    if action == 'artifact':
+        if not receipt.exists() or read(receipt)['status'] == 'unknown':
+            raise ValueError('Artifacts require a confirmed terminal task')
+        name = safe(data['path'])
+        base = job / ('outputs' if name.startswith('@outputs/') else 'work')
+        name = name[len('@outputs/'):] if name.startswith('@outputs/') else name
+        source = clean_path(base / safe(name))
+        if not source.exists():
+            raise ValueError('Artifact not found')
+        if source.is_dir():
+            entries(source)
+        elif not source.is_file():
+            raise ValueError('Artifact is not a regular file/directory')
+        output = job / ('artifact-' + str(os.getpid()) + '.tgz')
+        with tarfile.open(output, 'w:gz', dereference=False) as tf:
+            tf.add(source, arcname=source.name, recursive=True)
+        if output.stat().st_size > 256 * 1024 * 1024:
+            output.unlink()
+            raise ValueError('Artifact exceeds 256 MiB transfer limit')
+        return {'path': str(output), 'bytes': output.stat().st_size, 'sha256': sha(output)}
+    if action == 'cleanup':
+        if not receipt.exists() or read(receipt)['status'] == 'unknown':
+            raise ValueError('Unresolved task retained; do not delete active or unknown state')
+        shutil.rmtree(job)
+        return {'removed': identity}
+    if not lock.is_dir() or (lock / 'owner').read_text() != identity:
+        raise ValueError('Task does not own the workspace lock')
+    if action == 'abort-prepare':
+        if (job / 'process.json').exists():
+            raise ValueError('Cannot abort preparation after process start')
+        return finish('cancelled', 130)
+    request = read(job / 'request.json')
+    manifest = {}
+    for item in request['files']:
+        name = safe(item['path'])
+        if name in manifest or not re.fullmatch('[a-f0-9]{64}', item['sha256']) or not isinstance(item['size'], int) or item['size'] < 0 or not isinstance(item['mode'], int):
+            raise ValueError('Invalid manifest')
+        manifest[name] = item
+    seed = clean_path(root / 'input')
+    if action == 'stage':
+        existing = entries(seed)
+        for name, path in existing.items():
+            if name not in manifest:
+                path.unlink()
+        for folder, dirs, files in os.walk(seed, topdown=False):
+            for name in dirs:
+                path = pathlib.Path(folder) / name
+                if not any(path.iterdir()):
+                    path.rmdir()
+        for name in manifest:
+            (seed / name).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        previous = read(root / 'baseline.json') if (root / 'baseline.json').exists() else {}
+        return {'needed': [name for name, item in manifest.items() if previous.get(name) != item or not (seed / name).is_file()]}
+    if action == 'seal':
+        try:
+            verify(seed, manifest)
+            write(root / 'baseline.json', manifest)
+            shutil.copytree(seed, job / 'work')
+            (job / 'outputs').mkdir(mode=0o700)
+            (job / 'sealed').touch()
+            return {'sealed': True}
+        except Exception:
+            finish('failed', 125)
+            raise
+    if action != 'run':
+        raise ValueError('Unknown supervisor operation')
+    if receipt.exists() or (job / 'process.json').exists() or not (job / 'sealed').exists():
+        raise ValueError('Task already started or input not sealed')
+    if (job / 'cancel').exists():
+        return finish('cancelled', 130)
+    verify(job / 'work', manifest)
+    key = request['cacheKey']
+    if not re.fullmatch('[a-f0-9]{64}', key):
+        raise ValueError('Invalid cache key')
+    cache = clean_path(root / 'cache' / key)
+    for directory in ['node_modules','npm','pnpm','cargo','cargo-target','xdg','pycache']:
+        clean_path(cache / directory).mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.symlink(cache / 'node_modules', job / 'work' / 'node_modules', target_is_directory=True)
+    cwd = request['cwd']
+    workdir = job / 'work' if cwd == '.' else clean_path(job / 'work' / safe(cwd))
+    env = dict(os.environ)
+    env.update({'CARGO_HOME': str(cache / 'cargo'), 'CARGO_TARGET_DIR': str(cache / 'cargo-target'), 'npm_config_cache': str(cache / 'npm'), 'npm_config_store_dir': str(cache / 'pnpm'), 'XDG_CACHE_HOME': str(cache / 'xdg'), 'PYTHONPYCACHEPREFIX': str(cache / 'pycache'), 'REROUTE_ARTIFACTS': str(job / 'outputs'), 'REROUTE_JOB_ID': identity})
+    timeout = float(request['timeoutSeconds'])
+    if not 0 < timeout <= 86400:
+        raise ValueError('Invalid task timeout')
+    child = subprocess.Popen(['bash', '-lc', request['command']], cwd=workdir, env=env, start_new_session=True)
+    write(job / 'process.json', {'supervisor': os.getpid(), 'start': proc(os.getpid())['start'], 'child': child.pid})
+    until = time.monotonic() + timeout
+    interrupted = [False]
+    def interrupt(signum, frame):
+        interrupted[0] = True
+    for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, interrupt)
+    reason = None
+    while child.poll() is None:
+        if interrupted[0] or (job / 'cancel').exists():
+            reason = 'cancelled'
+            break
+        if time.monotonic() >= until:
+            reason = 'timed_out'
+            break
+        time.sleep(.05)
+    # Reap normal background children as well; a task cannot leave its group running.
+    confirmed = terminate_group(child.pid)
+    if not confirmed:
+        return finish('unknown', 125)
+    try:
+        code = child.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        return finish('unknown', 125)
+    if code < 0:
+        code = 128 - code
+    return finish(reason or 'exited', 130 if reason == 'cancelled' else 124 if reason == 'timed_out' else code)
+
+
+if __name__ == '__main__':
+    try:
+        result = main(sys.argv[1], json.loads(base64.b64decode(sys.argv[2])))
+        if sys.argv[1] != 'run':
+            print(json.dumps(result))
+        sys.exit(result.get('code', 0) if sys.argv[1] == 'run' else 0)
+    except Exception as error:
+        print(type(error).__name__ + ': ' + str(error), file=sys.stderr)
+        sys.exit(125)

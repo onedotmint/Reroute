@@ -40,7 +40,7 @@ export interface Provider {
   put(local: string, remote: string): Promise<void>;
   get(remote: string, local: string): Promise<void>;
   sync?(local: string, remote: string): Promise<number>;
-  lifecycle(action: 'stop' | 'resume' | 'destroy'): Promise<Partial<Profile> | void>;
+  lifecycle(action: 'stop' | 'resume' | 'destroy', checkpoint?: (patch: Partial<Profile>) => Promise<void>): Promise<Partial<Profile> | void>;
   close?(): Promise<void> | void;
 }
 export interface Entry { path: string; sha256: string; size: number; mode: number }
