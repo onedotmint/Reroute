@@ -70,3 +70,15 @@ export async function saveProviderSecrets(provider: ProviderId, values: SecretMa
   const merged = { ...await savedSecrets(), ...values };
   await atomicJson(secretFile(), merged);
 }
+
+/** Forget only Reroute's local private file entries; does not revoke a provider key or alter process environment. */
+export async function forgetProviderSecrets(provider: ProviderId): Promise<boolean> {
+  const old = await savedSecrets();
+  const remaining: SecretMap = {...old};
+  let changed = false;
+  for (const name of secretNames[provider]) {
+    if (name in remaining) { delete remaining[name]; changed = true; }
+  }
+  if (changed) { await privateDirectory(); await atomicJson(secretFile(), remaining); }
+  return changed;
+}

@@ -7,6 +7,8 @@ import { setup, installPi } from './setup.js';
 import { doctor } from './doctor.js';
 import { shell, processExec } from './util.js';
 import { createProvider } from './providers/index.js';
+import { credentialStatus, forgetProviderSecrets } from './auth.js';
+import { PROVIDERS, type ProviderId } from './types.js';
 export const HELP = `Reroute 0.3 - local source, native remote compute
 
   reroute setup                         Interactive project + Pi configuration
@@ -17,6 +19,8 @@ export const HELP = `Reroute 0.3 - local source, native remote compute
   reroute explain -- cargo test          Explain the routing decision
   reroute exec --shell 'cmd && cmd'       Explicitly trusted compound command
   reroute doctor [--connect] [--json]     Local prerequisites; optional live check
+  reroute credentials                     Show auth source, never secrets
+  reroute credentials forget --provider daytona --yes  Forget saved local key only
   reroute status [JOB_ID] [--json]        Read-only resource / job status
   reroute jobs [--json]                  Local receipts (no cloud calls)
   reroute cancel JOB_ID                  Request and verify remote termination
@@ -48,6 +52,20 @@ export async function main(argv=process.argv.slice(2)): Promise<void> {
     if(command==='setup'){const config=await setup(cwd,{nonInteractive:v['non-interactive'],provider:v.provider,id:v.id,name:v.name,root:v.root,port:v.port,identity:v.identity,app:v.app,tasks:v.tasks,noPi:v['no-pi'],ignoreLegacy:v['ignore-legacy']});if(v['non-interactive'])output({saved:true,active:config.active,pi:!v['no-pi']});return;}
     if(command==='pi'&&a[1]==='install'){output({entry:await installPi()});return;}
     if(command==='doctor'){const r=await doctor(cwd,v.connect);output(r);process.exitCode=r.ok?0:1;return;}
+    if(command==='credentials'){
+      if(!a[1]||a[1]==='status'){
+        const status: Record<string,string> = {};
+        for(const provider of PROVIDERS)status[provider]=await credentialStatus(provider);
+        output({credentialSources:status,notes:'No secrets shown. Native or detected credentials are not a connection check.'});return;
+      }
+      if(a[1]==='forget'){
+        if(!v.yes||!v.provider||!PROVIDERS.includes(v.provider as ProviderId))throw new Error('Use reroute credentials forget --provider daytona|modal|e2b --yes');
+        if(!['daytona','modal','e2b'].includes(v.provider))throw new Error('SSH and SkyPilot use native authentication, not stored Reroute API keys');
+        const forgotten=await forgetProviderSecrets(v.provider as ProviderId);
+        output({provider:v.provider,forgotten,scope:'Reroute local private file only; environment variables and provider-issued tokens remain valid'});return;
+      }
+      throw new Error('Use reroute credentials or reroute credentials forget --provider NAME --yes');
+    }
     if(command==='jobs'){const {root}=await loadConfig(cwd);output((await listJobs()).filter(j=>j.project===root));return;}
     if(['exec','run','local','explain'].includes(command)){
       if(v.shell!==undefined&&payload.length)throw new Error('Use either --shell or -- argument list, not both');

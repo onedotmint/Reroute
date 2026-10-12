@@ -1,6 +1,6 @@
 import type { BashOperations, ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 import { activeProfile, loadConfig, saveConfig, listJobs, validate } from './config.js';
-import { credentialStatus } from './auth.js';
+import { credentialStatus, forgetProviderSecrets } from './auth.js';
 import { discoverExisting } from './discovery.js';
 import { PROVIDERS, type Config, type Profile, type ProviderId, type Job } from './types.js';
 import { runRemote, resourceAction } from './engine.js';
@@ -79,12 +79,21 @@ async function editFromPi(ctx: ExtensionCommandContext, root: string, config: Co
 async function manageProviders(ctx: ExtensionCommandContext, root: string, config: Config): Promise<boolean> {
   for (;;) {
     const selected = await ctx.ui.select('Configured profiles (' + Object.keys(config.profiles).length + ')', [
-      'Add provider', 'Edit provider', 'Discover existing resources', 'Switch active provider', 'Remove local profile', 'Credentials help', 'Back',
+      'Add provider', 'Edit provider', 'Discover existing resources', 'Switch active provider', 'Remove local profile', 'Credentials', 'Back',
     ]);
     if (!selected || selected === 'Back') return false;
     if (selected === 'Add provider') return editFromPi(ctx, root, config);
-    if (selected === 'Credentials help') {
-      ctx.ui.notify('Use reroute setup in your terminal to enter masked keys, store them in a private 0600 file, or use native provider login. Pi input is not masked: never paste API keys here.', 'info');
+    if (selected === 'Credentials') {
+      const action = await ctx.ui.select('Credentials (never displayed in Pi)', ['Show credential sources', 'Forget saved key for active provider', 'How to add credentials', 'Back']);
+      if (action === 'Show credential sources') ctx.ui.notify(describeProfiles(config,[],await sourcesFor(config)), 'info');
+      else if (action === 'Forget saved key for active provider') {
+        const provider = config.profiles[config.active]!.provider;
+        if (provider === 'ssh' || provider === 'skypilot') ctx.ui.notify('This provider uses native SSH/SkyPilot authentication; Reroute stores no API key.', 'info');
+        else if (await ctx.ui.confirm('Forget stored '+provider+' keys?', 'Only keys in your local Reroute 0600 file are removed. Native environment credentials are unaffected. This may affect all profiles using this provider.')) {
+          const changed = await forgetProviderSecrets(provider);
+          ctx.ui.notify(changed ? 'Forgot Reroute-stored keys. Your provider tokens remain valid until revoked at the provider.' : 'No locally saved keys for '+provider, 'info');
+        }
+      } else if (action === 'How to add credentials') ctx.ui.notify('Run reroute setup in your terminal for masked API-key entry and read-only resource discovery. Never paste API keys into Pi input dialogs.', 'info');
     } else if (selected === 'Discover existing resources') {
       const name = await ctx.ui.select('Discover resources for which profile?', Object.keys(config.profiles));
       if (!name) continue;
