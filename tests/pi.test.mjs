@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import * as sdk from '@earendil-works/pi-coding-agent';
 import { registerPi, createRerouteOperations, panel } from '../dist/pi.js';
 import { defaults, saveConfig, loadConfig } from '../dist/config.js';
-import { installPi } from '../dist/setup.js';
+import { setup } from '../dist/setup.js';
 
 test('actual Pi extension loader loads the shipped adapter and registers native bash and /reroute',async t=>{
  const root=await mkdtemp(join(tmpdir(),'reroute-pi-load-')),agent=join(root,'agent');await mkdir(agent);t.after(()=>rm(root,{recursive:true,force:true}));
@@ -34,10 +34,21 @@ test('native panel changes routing without invoking a model or touching remote r
  const choices=['Routing mode','local','Close'];const ctx={cwd:root,hasUI:true,ui:{select:async()=>choices.shift(),notify:()=>{},confirm:async()=>{throw Error('should not request resource changes')}}};
  await panel(ctx);assert.equal((await loadConfig(root)).config.mode,'local');
 });
-test('owned Pi entry is installable, idempotent, and will not overwrite an unknown adapter',async t=>{
- const root=await mkdtemp(join(tmpdir(),'reroute-pi-entry-'));t.after(()=>rm(root,{recursive:true,force:true}));
- const path=await installPi(root);assert.match(await readFile(path,'utf8'),/Reroute v3 owned/);assert.equal(await installPi(root),path);
- await writeFile(path,'// user extension');await assert.rejects(installPi(root),/unowned/);assert.equal(await readFile(path,'utf8'),'// user extension');
+test('setup writes project config only, never personal or project Pi extensions/settings',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'reroute-native-only-'));
+ const agent=join(root,'private-pi-agent'),piRoot=join(root,'.pi');
+ t.after(()=>rm(root,{recursive:true,force:true}));
+ const previous=process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR=agent;
+ t.after(()=>{if(previous===undefined)delete process.env.PI_CODING_AGENT_DIR;else process.env.PI_CODING_AGENT_DIR=previous;});
+ const entry=join(agent,'extensions','reroute.ts');
+ await mkdir(join(agent,'extensions'),{recursive:true});
+ await writeFile(entry,'// user-authored extension - must never be touched\n');
+ await setup(root,{nonInteractive:true,provider:'ssh',id:'host'});
+ assert.equal((await loadConfig(root)).config.active,'default');
+ assert.equal(await readFile(entry,'utf8'),'// user-authored extension - must never be touched\n');
+ await assert.rejects(readFile(join(piRoot,'settings.json'),'utf8'),/ENOENT/);
+ await assert.rejects(readFile(join(piRoot,'extensions','reroute.ts'),'utf8'),/ENOENT/);
 });
 
 test('Pi overview shows configured profiles and local credential availability without contacting cloud',async t=>{
@@ -87,4 +98,21 @@ test('Pi natively loads a source-only Git package with NO dist directory or npm 
  assert.ok(extension.commands.has('reroute'));
  assert.ok(extension.tools.has('bash'));
  assert.ok(extension.handlers.has('user_bash'));
+});
+
+test('first /reroute invocation can create only the current project config',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'reroute-first-project-'));
+ t.after(()=>rm(root,{recursive:true,force:true}));
+ const menus=['Configure this project','ssh','Close'];
+ const inputs=['default','new-host',''];
+ const notices=[];
+ const ctx={cwd:root,hasUI:true,ui:{
+   select:async()=>menus.shift(),input:async()=>inputs.shift(),notify:(s)=>notices.push(s),confirm:async()=>true,
+ }};
+ await panel(ctx);
+ const {config}=await loadConfig(root);
+ assert.equal(config?.profiles.default?.provider,'ssh');
+ assert.equal(config?.profiles.default?.id,'new-host');
+ assert.equal(config?.active,'default');
+ await assert.rejects(readFile(join(root,'.pi','settings.json'),'utf8'),/ENOENT/);
 });

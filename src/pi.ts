@@ -1,5 +1,5 @@
 import type { BashOperations, ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
-import { activeProfile, loadConfig, saveConfig, listJobs, validate } from './config.js';
+import { activeProfile, defaults, hasLegacy, loadConfig, saveConfig, listJobs, validate } from './config.js';
 import { credentialStatus, forgetProviderSecrets } from './auth.js';
 import { discoverExisting } from './discovery.js';
 import { PROVIDERS, type Config, type Profile, type ProviderId, type Job } from './types.js';
@@ -145,7 +145,20 @@ export async function panel(ctx: ExtensionCommandContext): Promise<void> {
   for (;;) {
     const {root,config} = await loadConfig(ctx.cwd);
     if (!config) {
-      ctx.ui.notify('No Reroute profile in this project. Run reroute setup to choose SSH, Daytona, SkyPilot, Modal or E2B. No resources were contacted.', 'info');
+      if (await hasLegacy(root)) {
+        ctx.ui.notify('Legacy Reroute state found. Use the CLI with --ignore-legacy only after recovering old work; nothing was overwritten.', 'error');
+        return;
+      }
+      const first = await ctx.ui.select('Reroute | No configuration in this project', [
+        'Configure this project', 'How to configure API credentials', 'Close',
+      ]);
+      if (first === 'Configure this project') {
+        // The project directory must already be trusted by Pi before native project extensions load.
+        if (await editFromPi(ctx, root, defaults())) continue;
+        return;
+      }
+      if (first === 'How to configure API credentials')
+        ctx.ui.notify('Use your provider\'s native auth/environment, or optional `reroute setup` CLI for masked credential entry. Never paste API keys into a Pi text field.', 'info');
       return;
     }
     const profile = activeProfile(config), key = config.active + ':' + profile.id;

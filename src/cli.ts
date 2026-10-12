@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { activeProfile, loadConfig, listJobs, saveConfig } from './config.js';
 import { runRemote, inspectJob, downloadArtifact, cleanupJob, resourceAction } from './engine.js';
 import { ruleRouter } from './router.js';
-import { setup, installPi } from './setup.js';
+import { setup } from './setup.js';
 import { doctor } from './doctor.js';
 import { shell, processExec } from './util.js';
 import { createProvider } from './providers/index.js';
@@ -11,8 +11,8 @@ import { credentialStatus, forgetProviderSecrets } from './auth.js';
 import { PROVIDERS, type ProviderId } from './types.js';
 export const HELP = `Reroute 0.3 - local source, native remote compute
 
-  reroute setup                         Interactive project + Pi configuration
-  reroute setup --non-interactive --provider ssh --id user@host [--no-pi]
+  reroute setup                         Interactive project configuration (no Pi install)
+  reroute setup --non-interactive --provider ssh --id user@host
   reroute exec [--timeout SECONDS] [--stdin] -- cargo test   Force remote
   reroute run -- cargo test              Conservative automatic routing
   reroute local -- cargo test            Force local
@@ -30,11 +30,14 @@ export const HELP = `Reroute 0.3 - local source, native remote compute
   reroute mode auto|local                Set routing mode
   reroute resource stop|destroy --yes
   reroute resource resume --yes --allow-cost
-  reroute pi install                    Register the owned Pi extension entry
+  Pi-native extension install:
+    pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native
+    pi list -l / pi remove -l <source> / pi update --extensions
 
 Global: --cwd DIR. Setup: --name NAME --root /remote/path --port N
   --identity KEYFILE --app MODAL_APP --tasks build,test,check,benchmark
-  --ignore-legacy (isolated v3; old data retained). Nothing is provisioned by setup.
+  --ignore-legacy (isolated v3; old data retained). --no-pi is accepted as a legacy no-op.
+  Project config and Pi extension installation are separate; no global entry is written.
 Exit: task exit code, 124 confirmed timeout, 130 confirmed cancellation,
   125 infrastructure failure / unknown / incomplete output. Never local retry.
 `;
@@ -49,8 +52,8 @@ export async function main(argv=process.argv.slice(2)): Promise<void> {
     const command=a[0], cwd=resolve(v.cwd??process.cwd());
     if(v.version){console.log('0.3.0-native.3');return;}
     if(v.help||!command){console.log(HELP);return;}
-    if(command==='setup'){const config=await setup(cwd,{nonInteractive:v['non-interactive'],provider:v.provider,id:v.id,name:v.name,root:v.root,port:v.port,identity:v.identity,app:v.app,tasks:v.tasks,noPi:v['no-pi'],ignoreLegacy:v['ignore-legacy']});if(v['non-interactive'])output({saved:true,active:config.active,pi:!v['no-pi']});return;}
-    if(command==='pi'&&a[1]==='install'){output({entry:await installPi()});return;}
+    if(command==='setup'){const config=await setup(cwd,{nonInteractive:v['non-interactive'],provider:v.provider,id:v.id,name:v.name,root:v.root,port:v.port,identity:v.identity,app:v.app,tasks:v.tasks,noPi:v['no-pi'],ignoreLegacy:v['ignore-legacy']});if(v['non-interactive'])output({saved:true,active:config.active,pi:'managed-by-native-pi'});return;}
+    if(command==='pi')throw new Error('Reroute no longer writes Pi extension files. Install the native Pi package with: pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native');
     if(command==='doctor'){const r=await doctor(cwd,v.connect);output(r);process.exitCode=r.ok?0:1;return;}
     if(command==='credentials'){
       if(!a[1]||a[1]==='status'){

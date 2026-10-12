@@ -1,31 +1,14 @@
 import * as p from '@clack/prompts';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { join, resolve } from 'node:path';
 import { PROVIDERS, type Config, type Profile, type ProviderId, type Category } from './types.js';
 import { defaults, hasLegacy, loadConfig, saveConfig, validate } from './config.js';
-import { noSymlink } from './util.js';
 import { credentialStatus, saveProviderSecrets, secretNames, type SecretMap } from './auth.js';
 import { discoverExisting } from './discovery.js';
 import { doctor } from './doctor.js';
 export interface SetupOptions {
   nonInteractive?: boolean; provider?: string; id?: string; name?: string; root?: string;
   port?: string; identity?: string; app?: string; tasks?: string; noPi?: boolean; ignoreLegacy?: boolean;
-}
-const marker = '// Reroute v3 owned extension entry';
-export async function installPi(agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.pi', 'agent')): Promise<string> {
-  const target = join(agentDir, 'extensions', 'reroute.ts');
-  await noSymlink(target);
-  let previous: string | undefined;
-  try { previous = await readFile(target,'utf8'); } catch(e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
-  if (previous !== undefined && !previous.startsWith(marker + '\n')) throw new Error(`Existing unowned Pi extension retained: ${target}. Remove/disable the old adapter yourself, then rerun setup. Configuration was not lost.`);
-  const entry = fileURLToPath(new URL('../adapters/pi.ts', import.meta.url));
-  const source = `${marker}\nexport { default } from ${JSON.stringify(entry)};\n`;
-  await mkdir(dirname(target),{recursive:true,mode:0o700});
-  const temp = `${target}.${randomUUID()}.tmp`; await writeFile(temp,source,{flag:'wx',mode:0o600}); await rename(temp,target);
-  return target;
 }
 function answer<T>(v: T): Exclude<T, symbol> {
   if (p.isCancel(v)) throw new Error('Setup cancelled; no configuration saved');
@@ -125,7 +108,8 @@ export async function setup(cwd: string, options: SetupOptions = {}): Promise<Co
   validate(candidate);
   if (Object.keys(pending).length) await saveProviderSecrets(profile.provider!, pending);
   await saveConfig(root,candidate);
-  const entry = options.noPi ? undefined : await installPi();
+  // Pi package installation is always managed by Pi itself (pi install -l, pi remove -l).
+  // Setup touches project configuration only; never writes Pi extension entries or settings.
   if (!options.nonInteractive) {
     if (testConnection) {
       const spin = p.spinner(); spin.start('Checking existing resource (no resume)');
@@ -136,8 +120,8 @@ export async function setup(cwd: string, options: SetupOptions = {}): Promise<Co
       } catch { spin.stop('Connection could not be confirmed; see reroute doctor --connect'); }
     }
     p.outro('Saved '+join(root,'.reroute.json')+
-      (entry ? '\nPi extension registered: open Pi or run /reload, then /reroute.' : '')+
-      '\nYou can add another provider by rerunning reroute setup.');
+      '\nPi extension installation is managed separately by Pi (pi install -l ...).'+
+      '\nOpen Pi or run /reload, then /reroute. Add another provider by rerunning reroute setup.');
   }
   return candidate;
 }
