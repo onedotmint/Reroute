@@ -51,6 +51,7 @@ jobs:
           name: reroute-npm-node-${{ matrix.node }}-${{ github.sha }}
           path: .artifacts/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
       - name: Stop only the isolated test SSH daemon
         if: always()
