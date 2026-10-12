@@ -41,6 +41,11 @@ jobs:
         run: bash scripts/ssh-test-server.sh
       - name: Real SSH, rsync, Pi, artifacts and compiler-cache acceptance
         run: npm run test:ssh
+      - name: Real Pi-native Git project install, trust, /reroute loader and removal
+        if: github.event_name == 'push' && github.repository == 'onedotmint/Reroute' && matrix.node == '22'
+        env:
+          REROUTE_GIT_COMMIT: ${{ github.sha }}
+        run: node scripts/verify-pi-git.mjs
       - name: Measure local input preparation
         run: npm run benchmark
       - name: Pack and independently install this commit
