@@ -21,7 +21,7 @@ function pi(...args) {
   return r.stdout;
 }
 try {
-  pi('--approve','install','--local',source);
+  pi('install','--local','--approve',source);
   const config=JSON.parse(await readFile(join(project,'.pi','settings.json'),'utf8'));
   assert.ok(config.packages?.some(p=>(typeof p==='string'?p:p.source)===source),'Pi must persist the exact pinned source in project settings');
   const pkg=join(project,'.pi','git','github.com','onedotmint','Reroute');
@@ -34,11 +34,11 @@ try {
   assert.deepEqual(result.errors,[],'Pi must actually load the Git-installed source extension');
   assert.ok(result.extensions[0]?.commands.has('reroute'));
   assert.ok(result.extensions[0]?.tools.has('bash'));
-  assert.match(pi('--approve','list'),/Reroute/i);
-  assert.match(pi('--no-approve','list'),/No packages installed/);
+  assert.match(pi('list','--approve'),/Reroute/i);
+  assert.match(pi('list','--no-approve'),/No packages installed/);
   await assert.rejects(stat(join(agent,'extensions','reroute.ts')),/ENOENT/);
   await assert.rejects(stat(join(agent,'settings.json')),/ENOENT/);
-  pi('--approve','remove','--local',source);
+  pi('remove','--local','--approve',source);
   const after=JSON.parse(await readFile(join(project,'.pi','settings.json'),'utf8'));
   assert.equal(after.packages?.length??0,0);
   console.log(JSON.stringify({commit:sha,source,scope:'project',sourceOnly:true,extensionLoaded:true,registeredCommand:'/reroute',removed:true,globalPiUntouched:true}));
