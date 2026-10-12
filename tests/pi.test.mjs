@@ -104,7 +104,7 @@ test('first /reroute invocation can create only the current project config',asyn
  const root=await mkdtemp(join(tmpdir(),'reroute-first-project-'));
  t.after(()=>rm(root,{recursive:true,force:true}));
  const menus=['Configure this project','ssh','Close'];
- const inputs=['default','new-host',''];
+ const inputs=['default','new-host','','',''];
  const notices=[];
  const ctx={cwd:root,hasUI:true,ui:{
    select:async()=>menus.shift(),input:async()=>inputs.shift(),notify:(s)=>notices.push(s),confirm:async()=>true,
@@ -115,4 +115,49 @@ test('first /reroute invocation can create only the current project config',asyn
  assert.equal(config?.profiles.default?.id,'new-host');
  assert.equal(config?.active,'default');
  await assert.rejects(readFile(join(root,'.pi','settings.json'),'utf8'),/ENOENT/);
+});
+
+
+test('dangerous resource operations are hidden under Advanced, require consent, and never run on panel open',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'reroute-pi-advanced-'));
+ t.after(()=>rm(root,{recursive:true,force:true}));
+ await saveConfig(root,{...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'offline-host'}}});
+ const seen=[],notices=[];
+ const choices=['Advanced','Destroy resource','Close'];
+ await panel({cwd:root,hasUI:true,ui:{
+   select:async(_message,options)=>{seen.push(options);return choices.shift();},
+   confirm:async()=>false,
+   notify:s=>notices.push(s),
+ }});
+ assert.ok(seen[0].includes('Advanced'));
+ assert.ok(!seen[0].includes('Destroy resource'));
+ assert.ok(seen[1].includes('Destroy resource'));
+ assert.equal((await loadConfig(root)).config.profiles.ssh.id,'offline-host');
+ assert.deepEqual(notices,[]);
+});
+
+test('Pi profile edit cancellation does not save partial changes or contact providers',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'reroute-pi-cancel-'));
+ t.after(()=>rm(root,{recursive:true,force:true}));
+ const initial={...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'original-host'}}};
+ await saveConfig(root,initial);
+ const choices=['Manage providers','Edit provider','ssh','Keep current (ssh)','Close'];
+ const answers=['different-host',undefined];
+ await panel({cwd:root,hasUI:true,ui:{
+   select:async()=>choices.shift(),input:async()=>answers.shift(),
+   confirm:async()=>{throw Error('Cancel must not ask to save');},notify:()=>{},
+ }});
+ assert.deepEqual((await loadConfig(root)).config,initial);
+});
+
+test('switching an existing profile is a local-only operation',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'reroute-pi-switch-'));
+ t.after(()=>rm(root,{recursive:true,force:true}));
+ await saveConfig(root,{...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'host'},cloud:{provider:'daytona',id:'sandbox'}}});
+ const choices=['Manage providers','Switch active provider','cloud','Close'];
+ await panel({cwd:root,hasUI:true,ui:{
+   select:async()=>choices.shift(),notify:()=>{},
+   confirm:async()=>{throw Error('Switch needs no cloud management confirmation');},
+ }});
+ assert.equal((await loadConfig(root)).config.active,'cloud');
 });

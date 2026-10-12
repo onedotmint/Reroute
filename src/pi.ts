@@ -19,191 +19,199 @@ export function createRerouteOperations(local: BashOperations, execute = runRemo
   }};
 }
 
-/** Only local config, recent receipts and private credential availability; never contacts any cloud on panel open. */
-export function describeProfiles(config: Config, jobs: Job[] = [], sources: Record<string,string> = {}): string {
-  const rows = Object.entries(config.profiles).map(([name, p]) => {
-    const relevant = jobs.filter(j => j.profile.provider === p.provider && j.profile.id === p.id);
-    const active = relevant.filter(j => j.status === 'preparing' || j.status === 'running' || j.status === 'unknown').length;
-    return (name === config.active ? '* ' : '  ') + name + ' | ' + p.provider + ' | ' + p.id +
-      ' | auth: ' + (sources[name] || 'not inspected') +
-      ' | jobs: ' + relevant.length + (active ? ' (' + active + ' active/unresolved)' : '');
+/** Local-only summary. Opening /reroute never contacts a provider or resumes compute. */
+export function describeProfiles(config: Config, jobs: Job[] = [], sources: Record<string, string> = {}): string {
+  const rows = Object.entries(config.profiles).map(([name, profile]) => {
+    const related = jobs.filter(j => j.profile.provider === profile.provider && j.profile.id === profile.id);
+    const unresolved = related.filter(j => ['preparing', 'running', 'unknown'].includes(j.status)).length;
+    return (name === config.active ? '* ' : '  ') + name + ' | ' + profile.provider + ' | ' + profile.id +
+      ' | auth: ' + (sources[name] ?? 'not inspected') +
+      ' | jobs: ' + related.length + (unresolved ? ' (' + unresolved + ' active/unresolved)' : '');
   });
   return 'Mode: ' + config.mode + '\n' + rows.join('\n');
 }
-async function sourcesFor(config: Config): Promise<Record<string,string>> {
-  const out: Record<string,string> = {};
-  for (const [name, item] of Object.entries(config.profiles)) {
-    try { out[name] = await credentialStatus(item.provider); }
-    catch { out[name] = 'credential file needs attention'; }
+
+async function credentialSources(config: Config): Promise<Record<string, string>> {
+  const sources: Record<string, string> = {};
+  for (const [name, profile] of Object.entries(config.profiles)) {
+    try { sources[name] = await credentialStatus(profile.provider); }
+    catch { sources[name] = 'credential file needs attention'; }
   }
-  return out;
+  return sources;
 }
-async function editFromPi(ctx: ExtensionCommandContext, root: string, config: Config, editName?: string): Promise<boolean> {
-  const name = editName ?? await ctx.ui.input('New profile name', 'Example: daytona-build');
+
+async function editProfile(ctx: ExtensionCommandContext, root: string, config: Config, selectedName?: string): Promise<boolean> {
+  const name = selectedName ?? await ctx.ui.input('Profile name (add or edit)', 'Example: daytona-build');
   if (!name) return false;
   if (!/^[a-zA-Z0-9._-]+$/.test(name)) throw new Error('Profile name: letters, digits, dot, dash or underscore only');
-  const old = config.profiles[name];
-  const keep = old ? 'Keep current (' + old.provider + ')' : undefined;
+
+  const previous = config.profiles[name];
+  const keep = previous ? 'Keep current (' + previous.provider + ')' : undefined;
   const choice = await ctx.ui.select('Compute provider for ' + name, [...(keep ? [keep] : []), ...PROVIDERS]);
   if (!choice) return false;
-  const picked = (choice === keep ? old!.provider : choice) as ProviderId;
-  const profile: Partial<Profile> = old?.provider === picked ? {...old} : {provider:picked};
-  profile.provider = picked;
-  const resource = await ctx.ui.input('Existing resource ID' + (profile.id ? ' (current: ' + profile.id + '; blank keeps it)' : ''),
-    picked === 'ssh' ? 'SSH alias or user@host' : picked === 'skypilot' ? 'SkyPilot cluster / SSH alias' : 'Existing sandbox ID');
-  if (resource === undefined && !profile.id) return false;
-  if (resource?.trim()) profile.id = resource.trim();
-  if (!profile.id) throw new Error('Resource ID is required. This action does not create remote resources.');
-  if (picked === 'modal') {
-    const app = await ctx.ui.input('Existing Modal app name (current: ' + (profile.app ?? 'none') + '; blank keeps it)', 'Existing app name');
-    if (app === undefined && !profile.app) return false;
-    if (app?.trim()) profile.app = app.trim();
+  const provider = (choice === keep ? previous!.provider : choice) as ProviderId;
+  const profile: Partial<Profile> = previous?.provider === provider ? { ...previous } : {};
+  profile.provider = provider;
+
+  if (provider !== 'ssh')
+    ctx.ui.notify(provider + ' has offline contract coverage; external live verification is still pending. Select only existing resources.', 'info');
+  const id = await ctx.ui.input('Existing resource ID' + (profile.id ? ' (current: ' + profile.id + '; blank keeps it)' : ''),
+    provider === 'ssh' ? 'SSH alias or user@host' : provider === 'skypilot' ? 'SkyPilot cluster / SSH alias' : 'Existing sandbox ID');
+  if (id === undefined) return false;
+  profile.id = id.trim() || profile.id;
+  if (!profile.id) throw new Error('Enter an existing resource ID; Reroute does not provision compute.');
+
+  if (provider === 'modal') {
+    const app = await ctx.ui.input('Modal app name (blank keeps existing)', profile.app ?? 'Existing app name');
+    if (app === undefined) return false;
+    profile.app = app.trim() || profile.app;
     if (!profile.app) throw new Error('Modal requires an existing app name for snapshot resume.');
   }
-  if (picked === 'ssh' || picked === 'skypilot') {
-    const identity = await ctx.ui.input('SSH private key path (current: ' + (profile.identityFile ?? 'ssh-agent') + '; blank keeps it)', 'Absolute path, optional');
-    if (identity?.trim()) profile.identityFile = identity.trim();
-    const port = await ctx.ui.input('SSH port (current: ' + (profile.port ?? 'SSH config') + '; blank keeps it)', '1-65535, optional');
-    if (port?.trim()) profile.port = Number(port);
+  if (provider === 'ssh' || provider === 'skypilot') {
+    const identity = await ctx.ui.input('SSH private key path (blank keeps ssh-agent/config)', profile.identityFile ?? 'Absolute path, optional');
+    if (identity === undefined) return false;
+    if (identity.trim()) profile.identityFile = identity.trim();
+    const port = await ctx.ui.input('SSH port (blank keeps existing/SSH config)', profile.port ? String(profile.port) : '1-65535, optional');
+    if (port === undefined) return false;
+    if (port.trim()) profile.port = Number(port);
   }
-  const location = await ctx.ui.input('Remote root (current: ' + (profile.root ?? '/tmp/reroute-v3') + '; blank keeps it)', 'Absolute isolated path');
-  profile.root = location?.trim() || profile.root || '/tmp/reroute-v3';
-  const next: Config = { ...config, profiles: {...config.profiles, [name]: profile as Profile}, active: name };
+  const path = await ctx.ui.input('Isolated remote storage root (blank keeps existing)', profile.root ?? '/tmp/reroute-v3');
+  if (path === undefined) return false;
+  profile.root = path.trim() || profile.root || '/tmp/reroute-v3';
+
+  const next: Config = { ...config, profiles: { ...config.profiles, [name]: profile as Profile }, active: name };
   validate(next);
-  if (!await ctx.ui.confirm('Save local profile?', name + ' | ' + picked + ' | ' + profile.id +
-    '\nThis only changes this project config. No resource will be created or resumed.')) return false;
+  if (!await ctx.ui.confirm('Save project profile?', name + ' | ' + provider + ' | ' + profile.id + '\nNo cloud resources will be created or resumed.')) return false;
   await saveConfig(root, next);
-  ctx.ui.notify('Saved and selected ' + name + '. API key entry uses reroute setup in a terminal (masked).', 'info');
+  ctx.ui.notify('Saved ' + name + '. For masked API-key entry, use the optional reroute setup CLI.', 'info');
   return true;
 }
-async function manageProviders(ctx: ExtensionCommandContext, root: string, config: Config): Promise<boolean> {
-  for (;;) {
-    const selected = await ctx.ui.select('Configured profiles (' + Object.keys(config.profiles).length + ')', [
-      'Add provider', 'Edit provider', 'Discover existing resources', 'Switch active provider', 'Remove local profile', 'Credentials', 'Back',
-    ]);
-    if (!selected || selected === 'Back') return false;
-    if (selected === 'Add provider') return editFromPi(ctx, root, config);
-    if (selected === 'Credentials') {
-      const action = await ctx.ui.select('Credentials (never displayed in Pi)', ['Show credential sources', 'Forget saved key for active provider', 'How to add credentials', 'Back']);
-      if (action === 'Show credential sources') ctx.ui.notify(describeProfiles(config,[],await sourcesFor(config)), 'info');
-      else if (action === 'Forget saved key for active provider') {
-        const provider = config.profiles[config.active]!.provider;
-        if (provider === 'ssh' || provider === 'skypilot') ctx.ui.notify('This provider uses native SSH/SkyPilot authentication; Reroute stores no API key.', 'info');
-        else if (await ctx.ui.confirm('Forget stored '+provider+' keys?', 'Only keys in your local Reroute 0600 file are removed. Native environment credentials are unaffected. This may affect all profiles using this provider.')) {
-          const changed = await forgetProviderSecrets(provider);
-          ctx.ui.notify(changed ? 'Forgot Reroute-stored keys. Your provider tokens remain valid until revoked at the provider.' : 'No locally saved keys for '+provider, 'info');
-        }
-      } else if (action === 'How to add credentials') ctx.ui.notify('Run reroute setup in your terminal for masked API-key entry and read-only resource discovery. Never paste API keys into Pi input dialogs.', 'info');
-    } else if (selected === 'Discover existing resources') {
-      const name = await ctx.ui.select('Discover resources for which profile?', Object.keys(config.profiles));
-      if (!name) continue;
-      const profile = config.profiles[name]!;
-      if (!await ctx.ui.confirm('List existing '+profile.provider+' resources?', 'Read-only listing may contact its control plane. No compute will be provisioned or resumed.')) continue;
-      let resources: Awaited<ReturnType<typeof discoverExisting>>;
-      try { resources = await discoverExisting(profile.provider); }
-      catch { ctx.ui.notify('Resource listing failed. Check credentials with reroute setup; you can still enter an ID manually.', 'error'); continue; }
-      if (!resources.length) { ctx.ui.notify('No listed resources. Use Add / Edit provider to enter an existing ID manually.', 'info'); continue; }
-      const labels = resources.map(r => r.id + ' (' + r.state + ')');
-      const choice = await ctx.ui.select('Select existing '+profile.provider+' resource', labels);
-      if (!choice) continue;
-      const chosen = resources[labels.indexOf(choice)];
-      if (!chosen || chosen.id === profile.id) continue;
-      if (await ctx.ui.confirm('Use '+chosen.id+' for '+name+'?', 'Only the local profile ID changes. The remote resource remains untouched.')) {
-        profile.id = chosen.id;
-        await saveConfig(root, config);
-        ctx.ui.notify('Selected existing resource '+chosen.id, 'info');
-        return true;
-      }
-    } else if (selected === 'Edit provider') {
-      const name = await ctx.ui.select('Edit which profile?', Object.keys(config.profiles));
-      if (name) return editFromPi(ctx, root, config, name);
-    } else if (selected === 'Switch active provider') {
-      const name = await ctx.ui.select('Active provider', Object.keys(config.profiles).map(n=>n + ' (' + config.profiles[n]!.provider + ')'));
-      if (name) {
-        const selectedName = name.slice(0, name.indexOf(' ('));
-        config.active = selectedName;
-        await saveConfig(root, config);
-        return true;
-      }
-    } else if (selected === 'Remove local profile') {
-      if (Object.keys(config.profiles).length < 2) { ctx.ui.notify('Keep at least one profile. Remote resources are untouched.', 'info'); continue; }
-      const name = await ctx.ui.select('Remove saved LOCAL profile only (remote resources remain)', Object.keys(config.profiles));
-      if (!name) continue;
-      if (await ctx.ui.confirm('Remove local profile ' + name + '?', 'This only forgets the local profile. It will NOT destroy remote compute or delete credentials.')) {
-        delete config.profiles[name];
-        if (config.active === name) config.active = Object.keys(config.profiles)[0]!;
-        await saveConfig(root, config);
-        ctx.ui.notify('Forgot local profile ' + name + '; remote resources and credentials were not changed.', 'info');
-        return true;
-      }
-    }
+
+async function manageProfiles(ctx: ExtensionCommandContext, root: string, config: Config): Promise<boolean> {
+  const names = Object.keys(config.profiles);
+  const selected = await ctx.ui.select('Profiles (' + names.length + ')', [
+    'Add provider', 'Edit provider', 'Switch active provider', 'Discover existing resources', 'Remove local profile', 'Back',
+  ]);
+  if (!selected || selected === 'Back') return false;
+  if (selected === 'Add provider') return editProfile(ctx, root, config);
+
+  const name = await ctx.ui.select('Select profile', names);
+  if (!name) return false;
+  if (selected === 'Edit provider') return editProfile(ctx, root, config, name);
+  if (selected === 'Switch active provider') {
+    if (name === config.active) return false;
+    await saveConfig(root, { ...config, active: name });
+    return true;
   }
+  if (selected === 'Remove local profile') {
+    if (names.length === 1) { ctx.ui.notify('At least one profile must remain.', 'info'); return false; }
+    if (!await ctx.ui.confirm('Forget local profile ' + name + '?', 'Remote resources and credentials will NOT be changed.')) return false;
+    const profiles = { ...config.profiles };
+    delete profiles[name];
+    await saveConfig(root, { ...config, profiles, active: config.active === name ? Object.keys(profiles)[0]! : config.active });
+    return true;
+  }
+  if (!await ctx.ui.confirm('List existing ' + config.profiles[name]!.provider + ' resources?', 'Explicit read-only discovery. No provisioning, start or resume.')) return false;
+  let resources: Awaited<ReturnType<typeof discoverExisting>>;
+  try { resources = await discoverExisting(config.profiles[name]!.provider); }
+  catch { ctx.ui.notify('Listing unavailable. Check native credentials or use the masked CLI wizard.', 'error'); return false; }
+  if (!resources.length) { ctx.ui.notify('No existing resources returned; enter an ID with Edit provider.', 'info'); return false; }
+  const labels = resources.map(r => r.id + ' (' + r.state + ')');
+  const selectedId = await ctx.ui.select('Choose existing resource', labels);
+  if (!selectedId) return false;
+  const resource = resources[labels.indexOf(selectedId)];
+  if (!resource || resource.id === config.profiles[name]!.id) return false;
+  if (!await ctx.ui.confirm('Use existing resource ' + resource.id + '?', 'Only the local resource ID will change.')) return false;
+  await saveConfig(root, { ...config, profiles: { ...config.profiles, [name]: { ...config.profiles[name]!, id: resource.id } } });
+  return true;
 }
+
+async function advanced(ctx: ExtensionCommandContext, root: string, config: Config): Promise<boolean> {
+  const choice = await ctx.ui.select('Advanced (explicit actions; compute may be billable)', [
+    'Credential sources', 'Forget saved API key', 'Stop resource', 'Resume resource', 'Destroy resource', 'Back',
+  ]);
+  if (!choice || choice === 'Back') return false;
+  if (choice === 'Credential sources') {
+    ctx.ui.notify(describeProfiles(config, [], await credentialSources(config)) +
+      '\nAPI keys are never displayed. Use reroute setup for masked key entry.', 'info');
+    return false;
+  }
+  if (choice === 'Forget saved API key') {
+    const provider = activeProfile(config).provider;
+    if (provider === 'ssh' || provider === 'skypilot') {
+      ctx.ui.notify('This provider uses native authentication. Reroute stores no API key.', 'info'); return false;
+    }
+    if (await ctx.ui.confirm('Forget locally stored ' + provider + ' key?', 'Environment credentials remain; revoke leaked tokens at the provider.')) {
+      const changed = await forgetProviderSecrets(provider);
+      ctx.ui.notify(changed ? 'Local key forgotten. Provider-issued key remains valid until revoked.' : 'No Reroute-stored key found.', 'info');
+    }
+    return false;
+  }
+  const action = choice === 'Stop resource' ? 'stop' : choice === 'Resume resource' ? 'resume' : 'destroy';
+  const warning = action === 'resume' ? 'May incur charges. Modal may recreate compute from a snapshot.' :
+    action === 'destroy' ? 'Permanently destroy this remote resource and its data?' :
+      'Stop compute? Active/unresolved jobs must be resolved first.';
+  if (!await ctx.ui.confirm(choice + ': ' + activeProfile(config).id, warning)) return false;
+  await resourceAction(root, config, action);
+  ctx.ui.notify('Provider operation completed. Run Check connection to refresh status.', 'info');
+  return true;
+}
+
 export async function panel(ctx: ExtensionCommandContext): Promise<void> {
-  if (!ctx.hasUI) throw new Error('/reroute requires interactive Pi terminal. Use reroute status --json in scripts.');
-  const resourceChecks = new Map<string,string>();
+  if (!ctx.hasUI) throw new Error('/reroute requires an interactive Pi terminal.');
+  const checked = new Map<string, string>();
   for (;;) {
-    const {root,config} = await loadConfig(ctx.cwd);
+    const { root, config } = await loadConfig(ctx.cwd);
     if (!config) {
       if (await hasLegacy(root)) {
-        ctx.ui.notify('Legacy Reroute state found. Use the CLI with --ignore-legacy only after recovering old work; nothing was overwritten.', 'error');
+        ctx.ui.notify('Legacy Reroute state found. Recover old work before using --ignore-legacy; nothing was overwritten.', 'error');
         return;
       }
-      const first = await ctx.ui.select('Reroute | No configuration in this project', [
+      const choice = await ctx.ui.select('Reroute | No configuration in this project', [
         'Configure this project', 'How to configure API credentials', 'Close',
       ]);
-      if (first === 'Configure this project') {
-        // The project directory must already be trusted by Pi before native project extensions load.
-        if (await editFromPi(ctx, root, defaults())) continue;
-        return;
+      if (choice === 'Configure this project') {
+        if (await editProfile(ctx, root, defaults())) continue;
+      } else if (choice === 'How to configure API credentials') {
+        ctx.ui.notify('Use provider-native authentication or the optional reroute setup CLI for masked entry. Never paste secrets into Pi text fields.', 'info');
       }
-      if (first === 'How to configure API credentials')
-        ctx.ui.notify('Use your provider\'s native auth/environment, or optional `reroute setup` CLI for masked credential entry. Never paste API keys into a Pi text field.', 'info');
       return;
     }
-    const profile = activeProfile(config), key = config.active + ':' + profile.id;
-    const auth = await sourcesFor(config), current = resourceChecks.get(key) ?? 'not checked';
-    const configured = Object.keys(config.profiles).map(name => (name === config.active ? '*' : '') + name + ':' + config.profiles[name]!.provider).join(', ');
-    const title = 'Reroute | ' + profile.provider + ' (' + config.active + ')\n' +
-      'Resource: ' + profile.id + ' [' + current + ']\n' +
-      'Mode: ' + config.mode + ' | Auth: ' + auth[config.active] + '\n' +
-      'Profiles: ' + (configured.length > 100 ? configured.slice(0,97) + '...' : configured);
-    const selected = await ctx.ui.select(title, [
-      'Overview', 'Manage providers', 'Check connection', 'Routing mode',
-      'Recent jobs', 'Stop resource', 'Resume resource', 'Destroy resource', 'Close',
+
+    const profile = activeProfile(config);
+    const key = config.active + ':' + profile.id;
+    const current = checked.get(key) ?? 'not checked';
+    const sources = await credentialSources(config);
+    const title = 'Reroute | ' + profile.provider + ' (' + config.active + ')' +
+      '\nResource: ' + profile.id + ' [' + current + '] | Mode: ' + config.mode +
+      ' | Auth: ' + sources[config.active] +
+      '\nProfiles: ' + Object.keys(config.profiles).length;
+    const action = await ctx.ui.select(title, [
+      'Overview', 'Manage providers', 'Check connection', 'Routing mode', 'Recent jobs', 'Advanced', 'Close',
     ]);
-    if (!selected || selected === 'Close') return;
+    if (!action || action === 'Close') return;
     try {
-      if (selected === 'Overview') {
+      if (action === 'Overview') {
         const jobs = (await listJobs()).filter(j => j.project === root);
-        ctx.ui.notify(describeProfiles(config, jobs, auth) + '\nResource status ('+config.active+'): '+current+'\nNo cloud calls made to view this overview.', 'info');
-      } else if (selected === 'Manage providers') {
-        if (await manageProviders(ctx, root, config)) resourceChecks.clear();
-      } else if (selected === 'Check connection') {
-        const r = await doctor(ctx.cwd, true);
-        const status = String(r.checks.resource ?? (r.ok ? 'running' : 'unavailable'));
-        resourceChecks.set(key, status);
-        ctx.ui.notify('Profile: ' + config.active + ' (' + profile.provider + ')\nResource: ' + status +
-          '\nConnection: ' + (r.ok ? 'verified' : 'not ready') + '\nCheck with reroute doctor --connect for more detail.', r.ok ? 'info' : 'error');
-      } else if (selected === 'Routing mode') {
-        const mode = await ctx.ui.select('Mode', ['auto','local']);
-        if (mode) { config.mode = mode as 'auto'|'local'; await saveConfig(root, config); }
-      } else if (selected === 'Recent jobs') {
-        const jobs = (await listJobs()).filter(j=>j.project===root).slice(0,8);
-        ctx.ui.notify(jobs.map(j=>j.id + ' | ' + j.status + (j.code === undefined ? '' : ' (' + j.code + ')') +
-          ' | ' + j.profile.provider + ' | ' + j.command +
-          (j.metrics ? '\n  input: ' + j.metrics.inputBytes + ' B; transferred: ' + j.metrics.transferredBytes + ' B' : '')).join('\n') || 'No tasks recorded', 'info');
-      } else {
-        const action = selected === 'Stop resource' ? 'stop' : selected === 'Resume resource' ? 'resume' : 'destroy';
-        const warning = action === 'resume' ?
-          'Resume compute? This may incur charges. Modal may recreate compute from its saved snapshot.' :
-          action === 'destroy' ? 'Permanently destroy the configured remote resource and its data?' :
-          'Stop the resource? Active/unresolved Reroute jobs must be resolved first.';
-        if (await ctx.ui.confirm(action + ': ' + profile.id, warning)) {
-          await resourceAction(root,config,action);
-          resourceChecks.delete(key);
-          ctx.ui.notify('Provider operation completed; use Check connection to refresh.', 'info');
-        }
+        ctx.ui.notify(describeProfiles(config, jobs, sources) + '\nResource (' + config.active + '): ' + current +
+          '\nNo cloud calls made to view this overview.', 'info');
+      } else if (action === 'Manage providers') {
+        if (await manageProfiles(ctx, root, config)) checked.clear();
+      } else if (action === 'Routing mode') {
+        const mode = await ctx.ui.select('Mode', ['auto', 'local']);
+        if (mode) await saveConfig(root, { ...config, mode: mode as Config['mode'] });
+      } else if (action === 'Check connection') {
+        const result = await doctor(ctx.cwd, true);
+        const status = String(result.checks.resource ?? 'unavailable');
+        checked.set(key, status);
+        ctx.ui.notify('Resource: ' + status + ' | Connection: ' + (result.ok ? 'verified' : 'not ready') +
+          '\nDetailed diagnostics: reroute doctor --connect', result.ok ? 'info' : 'error');
+      } else if (action === 'Recent jobs') {
+        const jobs = (await listJobs()).filter(j => j.project === root).slice(0, 8);
+        ctx.ui.notify(jobs.map(j => j.id + ' | ' + j.status + ' | ' + j.profile.provider +
+          ' | ' + j.command + (j.metrics ? '\n  transferred: ' + j.metrics.transferredBytes + ' B' : '')).join('\n') || 'No tasks recorded', 'info');
+      } else if (action === 'Advanced') {
+        if (await advanced(ctx, root, config)) checked.clear();
       }
     } catch (error) {
       ctx.ui.notify(error instanceof Error ? error.message : 'Operation failed', 'error');
