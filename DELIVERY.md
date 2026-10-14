@@ -62,3 +62,20 @@
 - Existing configuration/router/engine/provider/CLI and management UX are retained. Local-mode, unconfigured and ineligible decisions return `not_started`, not a hidden local process; Bash remains owned by Pi/AFT. Remote failure/unknown state never triggers local retry. See [README tool contract](README.md#independent-pi-tool).
 - Automated tests cover real source-loader registration, source-only loading, native local package install/load/remove, mock Provider execution receipts (success/nonzero/cancel/timeout/unknown/transport/upload failure), split UTF-8, bounded output and no local retry. Existing localhost OpenSSH acceptance now exercises independent tool output, nonzero status, timeout and cancellation rather than the retired Bash override.
 - Tool availability and prompt guidance are verified separately from model choice. No real-model selection accuracy claim; no live paid cloud qualification.
+
+### Independent-tool verification evidence
+
+- Local `npm run verify` and `npm run check:package` passed. Default offline suite: 58 passed, two explicitly optional installed-AFT cases skipped; with installed AFT enabled: **60 passed, zero failed/skipped**. Native package tests install, load and remove without changing personal Pi settings; source-only loading does not need `dist/`.
+- **Actual joint loading/execution:** installed `@cortexkit/aft-pi` + Linux Rust backend **0.59.0**, on repo-pinned Pi **1.1.0** and host Pi **1.2.0**. Both AFT-first and Reroute-first orders passed. Definition ownership/default activation and official nested tool calls were checked; backend spawn/version/task logs prove this was real AFT, not its fallback or the bash-only fixture. All model calls were blocked. This is automated real Pi/AFT execution evidence, not manual interactive TUI or model-selection evidence.
+- [CI run 38590188172](https://github.com/onedotmint/Reroute/actions/runs/38590188172) passed on initial implementation commit `e89714d787c7db47a8d51f38e6d083d2dfb18738`: Node 22/24 types, tests, smoke, localhost OpenSSH/rsync/tool acceptance, benchmark and clean package installation; Node 22 additionally performed exact-commit native Pi Git-install/load/remove. Later commits are revalidated by CI; use [PR checks](https://github.com/onedotmint/Reroute/pull/1/checks) and archive SHA files for the final head, not this historical checkpoint. This machine lacks `sshd`, so real SSH evidence comes from CI, not a local mocked substitute.
+- Existing `npm audit` reports four high-severity advisories in the Daytona dependency tree (`@daytona/sdk`, `braces`, `fast-glob`, `micromatch`). No dependency versions were upgraded in this integration-only change; the added Pi schema peer is host-provided. This is not a security-production-readiness claim.
+
+Reproduce actual AFT acceptance from a built source checkout, using installed paths (no global config changes):
+
+~~~bash
+REROUTE_AFT_EXTENSION=/absolute/path/to/@cortexkit/aft-pi/dist/index.js \
+AFT_BINARY_PATH=/absolute/path/to/@cortexkit/aft-linux-x64/bin/aft \
+npm test
+~~~
+
+For a different installed Pi host, also set `REROUTE_PI_SDK_PATH` to its `dist/index.js` and run `node --test tests/pi-coexistence.test.mjs`. Without `REROUTE_AFT_EXTENSION`, CI runs both bash-only fixture orders and explicitly skips actual-AFT cases. The optional test never installs or modifies AFT. No real-model task-choice probe or live Daytona/SkyPilot/Modal/E2B account run was performed.

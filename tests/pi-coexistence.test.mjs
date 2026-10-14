@@ -107,6 +107,10 @@ async function coexistence(order, aftPath) {
     assert.equal(outcome.isError, false);
     assert.match(outcome.result.content.filter(c => c.type === 'text').map(c => c.text).join('\n'), /REROUTE_COEXISTENCE_OK/);
     assert.ok(events.some(event => event.toolName === 'bash' && event.parentToolCallId === 'coexistence-probe'));
+    const refused = await ctx.executeTool('reroute_run', { command: 'git status' });
+    assert.equal(refused.isError, true);
+    assert.equal(refused.result.structuredContent.status, 'not_started');
+    assert.match(refused.result.structuredContent.reason, /Nothing executed/);
     if (aftPath) assert.equal(outcome.result.details.exit_code, 0);
     assert.deepEqual(errors, []);
     assert.equal(modelCalls, 0);
