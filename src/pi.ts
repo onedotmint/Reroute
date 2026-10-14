@@ -1,4 +1,6 @@
-import type { BashOperations, ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
+import { defineTool, type ExtensionAPI, type ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
+import { Type } from '@earendil-works/pi-ai';
+import { StringDecoder } from 'node:string_decoder';
 import { activeProfile, defaults, hasLegacy, loadConfig, saveConfig, listJobs, validate } from './config.js';
 import { credentialStatus, forgetProviderSecrets } from './auth.js';
 import { discoverExisting } from './discovery.js';
@@ -6,17 +8,85 @@ import { PROVIDERS, type Config, type Profile, type ProviderId, type Job } from 
 import { runRemote, resourceAction } from './engine.js';
 import { ruleRouter } from './router.js';
 import { doctor } from './doctor.js';
-type PiSDK = Pick<typeof import('@earendil-works/pi-coding-agent'), 'createBashTool' | 'createBashToolDefinition' | 'createLocalBashOperations'>;
-export function createRerouteOperations(local: BashOperations, execute = runRemote): BashOperations {
-  return {exec:async(command,cwd,options)=>{
-    const {root,config}=await loadConfig(cwd);
-    if (!config || (await ruleRouter(command,cwd,config)).route==='local') return local.exec(command,cwd,options);
-    const result=await execute(command,{root,config,cwd,signal:options.signal,timeoutMs:options.timeout===undefined?undefined:options.timeout*1000,
-      stdout:options.onData,stderr:options.onData});
-    if(result.job.error)options.onData(Buffer.from(`\n[Reroute ${result.job.id}: ${result.job.status}] ${result.job.error}\n`));
-    else if(result.job.status!=='exited')options.onData(Buffer.from(`\n[Reroute ${result.job.id}: ${result.job.status}]\n`));
-    return {exitCode:result.code};
-  }};
+// Keep the Pi entry independent of Bash: local decisions are refusals, never implicit execution.
+export function createRerouteTool(execute = runRemote) {
+  return defineTool({
+    name: 'reroute_run',
+    label: 'Reroute',
+    description: "Run build, test, check and other eligible compute tasks using the project's configured Reroute execution environment. Uses conservative routing; local-mode, unconfigured and ineligible commands are not executed. Use bash for ordinary shell operations, deployment, authentication, interactive shells and unknown side effects. Never retry a failed or uncertain remote task locally without user authorization.",
+    promptSnippet: 'Run eligible build/test/check/compute tasks in the configured Reroute environment; ordinary shell operations use bash.',
+    promptGuidelines: [
+      'Prefer reroute_run for eligible compute tasks; use bash for file operations, deployment, authentication, interactive shells and commands with unknown side effects.',
+      'reroute_run respects project routing and may decline a task. It never provisions or resumes resources automatically, or falls back to local execution.',
+      'After a remote failure or unknown state, inspect the reported Job ID; do not rerun locally without user authorization. Tool selection is not deterministic command interception.',
+    ],
+    exposure: 'direct',
+    defaultActive: true,
+    parameters: Type.Object({
+      command: Type.String({ minLength: 1, description: 'A single eligible compute command, evaluated by the project router.' }),
+      timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 86400, description: 'Task timeout in seconds; defaults to project configuration.' })),
+    }),
+    outputSchema: Type.Object({
+      status: Type.String(), exitCode: Type.Union([Type.Number(), Type.Null()]),
+      jobId: Type.Union([Type.String(), Type.Null()]), reason: Type.Union([Type.String(), Type.Null()]),
+      stdout: Type.String(), stderr: Type.String(), outputTruncated: Type.Boolean(),
+    }),
+    async execute(_id, params, signal, onUpdate, ctx) {
+      let job: Job | undefined;
+      let stdout = '', stderr = '', outputTruncated = false, lastUpdate = 0;
+      const outDecoder = new StringDecoder('utf8'), errDecoder = new StringDecoder('utf8');
+      const append = (channel: 'stdout' | 'stderr', text: string) => {
+        const value = (channel === 'stdout' ? stdout : stderr) + text;
+        outputTruncated ||= value.length > 8192;
+        if (channel === 'stdout') stdout = value.slice(-8192); else stderr = value.slice(-8192);
+      };
+      const result = (status: string, exitCode: number | null, reason?: string, isError = false) => {
+        if (reason && reason.length > 8192) { reason = '[Diagnostic truncated] ' + reason.slice(-8192); outputTruncated = true; }
+        const details = { status, exitCode, jobId: job?.id ?? null, reason: reason ?? null, stdout, stderr, outputTruncated };
+        const text = ['Reroute status: ' + status, 'Exit code: ' + (exitCode ?? 'not available'),
+          ...(job ? ['Job ID: ' + job.id] : []), ...(reason ? [reason] : []),
+          ...(stdout ? ['stdout:\n' + stdout] : []), ...(stderr ? ['stderr:\n' + stderr] : []),
+          ...(outputTruncated ? ['[Output truncated: only the last 8192 characters per stream/diagnostic are retained. Full output is not saved by this tool.]'] : []),
+        ].join('\n');
+        return { content: [{ type: 'text' as const, text }], details, structuredContent: details, isError };
+      };
+      const progress = () => {
+        if (onUpdate && Date.now() - lastUpdate >= 250) {
+          lastUpdate = Date.now();
+          onUpdate(result(job?.status ?? 'preparing', null));
+        }
+      };
+      try {
+        signal?.throwIfAborted();
+        if (!params.command.trim()) throw new Error('Command must not be blank');
+        if (params.timeout !== undefined && (!Number.isFinite(params.timeout) || params.timeout <= 0 || params.timeout > 86400))
+          throw new Error('Task timeout must be in (0, 86400] seconds');
+        const { root, config } = await loadConfig(ctx.cwd);
+        const decision = config ? await ruleRouter(params.command, ctx.cwd, config) : { route: 'local', reason: 'not-configured' };
+        if (decision.route === 'local') return result('not_started', null,
+          decision.reason + '. Nothing executed. Use bash if local execution is intended; configure /reroute for eligible remote tasks.', true);
+        const remote = await execute(params.command, {
+          root, config, cwd: ctx.cwd, signal,
+          timeoutMs: params.timeout === undefined ? undefined : params.timeout * 1000,
+          onJob: value => { job = value; progress(); },
+          stdout: chunk => { append('stdout', outDecoder.write(chunk)); progress(); },
+          stderr: chunk => { append('stderr', errDecoder.write(chunk)); progress(); },
+        });
+        job = remote.job;
+        append('stdout', outDecoder.end()); append('stderr', errDecoder.end());
+        // Providers normally stream; retain bounded returned output if no callbacks were made.
+        if (!stdout) append('stdout', remote.stdout);
+        if (!stderr) append('stderr', remote.stderr);
+        outputTruncated ||= !!(remote.stdoutTruncated || remote.stderrTruncated);
+        return result(job.status, remote.code, job.error,
+          remote.code !== 0 || job.status !== 'exited' || !!job.error);
+      } catch (error) {
+        append('stdout', outDecoder.end()); append('stderr', errDecoder.end());
+        return result(job?.status ?? (signal?.aborted ? 'cancelled' : 'failed'), job ? 125 : null,
+          String(error) + '. Never retried locally.', true);
+      }
+    },
+  });
 }
 
 /** Local-only summary. Opening /reroute never contacts a provider or resumes compute. */
@@ -218,11 +288,7 @@ export async function panel(ctx: ExtensionCommandContext): Promise<void> {
     }
   }
 }
-export function registerPi(pi: ExtensionAPI, sdk: PiSDK): void {
-  if(typeof sdk.createBashTool!=='function'||typeof sdk.createLocalBashOperations!=='function')throw new Error('Reroute needs Pi native BashOperations support; no fallback shim was installed');
-  const operations=createRerouteOperations(sdk.createLocalBashOperations());
-  const factory=sdk.createBashToolDefinition??sdk.createBashTool;
-  pi.registerTool(factory(process.cwd(),{operations}));
-  pi.on('user_bash',()=>({operations}));
+export function registerPi(pi: ExtensionAPI): void {
+  pi.registerTool(createRerouteTool());
   pi.registerCommand('reroute',{description:'Reroute provider, routing and resource controls (no model calls)',handler:async(_args,ctx)=>panel(ctx)});
 }

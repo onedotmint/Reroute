@@ -4,7 +4,7 @@
 
 **Build:** npm version `0.3.0-native.4`, `npm pack` to `reroute-0.3.0-native.4.tgz`. CI runs locked `npm ci`, strict types/build, tests, real localhost SSH, benchmark, real pack + clean-prefix install/smoke, then uploads the tarball and evidence as `reroute-npm-node-<node>-<sha>`, retention 30 days. No npm publish or GitHub Release.
 
-**Architecture removal (0.2 → 0.3):** removed resident daemon, generic multi-way synchronization and source writeback, merge conflict states, remote dev server/preview, unrelated adapters and legacy protocol. Retained the usable idea of a native Pi Bash interface, Clack setup, conservative command classification, direct compute providers; rebuilt one-way snapshots and a small task supervisor. Uses OpenSSH, rsync, official Daytona/Modal/E2B SDKs, SkyPilot CLI, Pi SDK and TypeScript; no LLM client.
+**Architecture removal (0.2 → 0.3):** removed resident daemon, generic multi-way synchronization and source writeback, merge conflict states, remote dev server/preview, unrelated adapters and legacy protocol. Retained native Pi integration (now an independent compute tool, not a Bash interface), Clack setup, conservative command classification, direct compute providers; rebuilt one-way snapshots and a small task supervisor. Uses OpenSSH, rsync, official Daytona/Modal/E2B SDKs, SkyPilot CLI, Pi SDK and TypeScript; no LLM client.
 
 ## Configuration and control UX update
 
@@ -37,7 +37,7 @@
 |---|---|
 | Type checking, build, offline tests and CLI smoke | Node 22 + Node 24 GitHub Actions steps passed in historical run 38225923288; required in final CI |
 | Real SSH | GitHub Ubuntu localhost OpenSSH + rsync: dirty/new/deleted input, separated stdout/stderr/exit, no source writeback, incremental transfer, cache reuse, verified no-overwrite artifact, stdin/EOF, confirmed timeout/cancel, lock serialization, corrupt transfer/symlink refusal |
-| Pi | Real Pi SDK BashOperations actually executed SSH task; extension registration contract tested. **Interactive WSL2 Pi/TUI NOT VERIFIED** |
+| Pi | Independent `reroute_run` source loading, schema/guidelines/default exposure, refusal and execution results tested; no Bash or `user_bash` registration. Real SSH tool path is required by CI. **Interactive user WSL2 Pi/TUI and real-model selection NOT VERIFIED** |
 | Rust and Node cache | Actual remote npm-ci bootstrap and Cargo cold/warm compilation tested through localhost SSH |
 | Packaging | Actual npm tarball installed into clean prefix, offline `--help` / `doctor` / smoke execution checked; final run artifact must be separately verified |
 | Performance | Synthetic 128 × 64 KiB preparation measurement and localhost SSH test timings saved as JSON in CI artifact; **no proof of real-device CPU/RAM savings or remote speedup** |
@@ -54,3 +54,11 @@
 **Known limits:** input snapshots are double-checked but not filesystem-atomic; Git index capture is capped at 1 MiB, total input at 512 MiB, each file at 256 MiB; artifact archive at 256 MiB. Symlink inputs rejected. Shared project execution is serialized. Cancellation or transport state can be unknown and is never reported as confirmed success. SSH host lifecycle is not supported. Per-provider live SDK/CLI behavior is still a validation gap.
 
 **Recovery/install:** use `pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native`, trust the project in Pi, and run `/reroute` to configure the project. For the optional standalone CLI, checkout the branch or use the actual successful [Verify native Reroute Actions run](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml). Download a `reroute-npm-node-<node>-<sha>` artifact, unzip, compare `COMMIT.txt` with run head SHA, install `npm install -g ./reroute-0.3.0-native.4.tgz` inside WSL2, run `reroute setup` and `reroute doctor --connect` in the project. CLI setup does not install the Pi extension; Pi does so separately. Always report missing/failed CI or live checks as such; no substitute fake tarballs.
+
+## Independent Pi tool integration
+
+- Removed `createRerouteOperations`, the `createBashTool`/BashOperations adapter and `user_bash` interception. No replacement hook chain, registry, spawn interception or AFT modification. `registerPi` registers only the native `reroute_run` tool and `/reroute` command.
+- The tool is directly exposed and default-active, with official Pi TypeBox schema (`command`, optional timeout seconds), prompt snippet/guidelines, bounded per-stream tails and progress, explicit status/exit/Job ID and error results. Pi supplies the schema/SDK peer packages; no new AI client or service.
+- Existing configuration/router/engine/provider/CLI and management UX are retained. Local-mode, unconfigured and ineligible decisions return `not_started`, not a hidden local process; Bash remains owned by Pi/AFT. Remote failure/unknown state never triggers local retry. See [README tool contract](README.md#independent-pi-tool).
+- Automated tests cover real source-loader registration, source-only loading, native local package install/load/remove, mock Provider execution receipts (success/nonzero/cancel/timeout/unknown/transport/upload failure), split UTF-8, bounded output and no local retry. Existing localhost OpenSSH acceptance now exercises independent tool output, nonzero status, timeout and cancellation rather than the retired Bash override.
+- Tool availability and prompt guidance are verified separately from model choice. No real-model selection accuracy claim; no live paid cloud qualification.

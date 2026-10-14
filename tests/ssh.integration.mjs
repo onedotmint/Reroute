@@ -6,11 +6,10 @@ import { tmpdir } from 'node:os';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { spawnSync } from 'node:child_process';
-import * as sdk from '@earendil-works/pi-coding-agent';
 import { defaults, saveConfig, getJob } from '../dist/config.js';
 import { runRemote, downloadArtifact, inspectJob, helperCommand } from '../dist/engine.js';
 import { SshProvider } from '../dist/providers/ssh.js';
-import { createRerouteOperations } from '../dist/pi.js';
+import { createRerouteTool } from '../dist/pi.js';
 import { shell, requireSuccess } from '../dist/util.js';
 const env=process.env;
 if(!env.REROUTE_TEST_SSH_ID||!env.REROUTE_TEST_SSH_PORT||!env.REROUTE_TEST_SSH_KEY)throw Error('Real SSH test requires the isolated CI server, or explicit REROUTE_TEST_SSH_* variables. Not a mocked pass.');
@@ -62,11 +61,22 @@ await test('real SSH: symlink artifact and corrupt transfer fail closed, no unce
   const check=await provider.exec('test ! -e '+shell([job.root+'/work/MUST_NOT_EXECUTE']));assert.equal(check.code,0);
   mark('actual SSH file transfer fault injection; verifier rejects before execution; symlink artifact refused');
 });
-await test('real SSH: Pi native Bash calls the remote operations and keeps native result protocol', {timeout:120000},async()=>{
-  config.remote=[['printenv','SSH_CONNECTION']];await saveConfig(root,config);
-  const tool=sdk.createBashTool(root,{operations:createRerouteOperations(sdk.createLocalBashOperations())});
-  const r=await tool.execute('ssh-pi-test',{command:"printenv SSH_CONNECTION"},undefined,()=>{});
-  assert.match(r.content.map(x=>x.text??'').join('\n'),/127\.0\.0\.1/);assert.equal(r.structuredContent.exit_code,0);mark('actual Pi native Bash -> Reroute -> actual SSH process');
+await test('real SSH: independent Pi tool keeps output, status and remote receipt without overriding Bash', {timeout:120000},async()=>{
+  config.remote=[['printenv','SSH_CONNECTION'],['python3']];await saveConfig(root,config);
+  await writeFile(join(root,'reroute-failed.py'),'import sys\nprint(42)\nprint(43, file=sys.stderr)\nsys.exit(7)\n');
+  await writeFile(join(root,'reroute-sleep.py'),'import time\nprint("ready", flush=True)\ntime.sleep(20)\n');
+  const tool=createRerouteTool(),updates=[];
+  const r=await tool.execute('ssh-pi-test',{command:'printenv SSH_CONNECTION'},undefined,u=>updates.push(u),{cwd:root});
+  assert.match(r.details.stdout,/127\.0\.0\.1/);assert.equal(r.details.exitCode,0);assert.equal(r.details.status,'exited');assert.ok(r.details.jobId);assert.ok(updates.length);
+  const failed=await tool.execute('nonzero',{command:'python3 reroute-failed.py'},undefined,undefined,{cwd:root});
+  assert.equal(failed.isError,true);assert.equal(failed.details.exitCode,7);assert.match(failed.details.stdout,/42/);assert.match(failed.details.stderr,/43/);
+  const timed=await tool.execute('timeout',{command:'python3 reroute-sleep.py',timeout:0.25},undefined,undefined,{cwd:root});
+  assert.equal(timed.isError,true);assert.equal(timed.details.status,'timed_out');assert.equal(timed.details.exitCode,124);
+  const controller=new AbortController();
+  const cancellable=createRerouteTool((c,o)=>runRemote(c,{...o,stdout:b=>{o.stdout(b);if(b.toString().includes('ready'))controller.abort();}}));
+  const cancelled=await cancellable.execute('cancel',{command:'python3 reroute-sleep.py'},controller.signal,undefined,{cwd:root});
+  assert.equal(cancelled.isError,true);assert.equal(cancelled.details.status,'cancelled');assert.equal(cancelled.details.exitCode,130);
+  mark('independent Pi reroute_run -> actual SSH; stdout/stderr/exit7; timeout124/cancellation130; Job ID and progress');
 });
 await test('real SSH: native lockfile bootstrap and Cargo compiler cache measurements', {timeout:180000},async()=>{
   await writeFile(join(root,'package.json'),JSON.stringify({name:'reroute-fixture',version:'1.0.0',scripts:{build:'node -e "console.log(42)"'}}));

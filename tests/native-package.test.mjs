@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import * as sdk from '@earendil-works/pi-coding-agent';
 
 const root=resolve('.');
 const piCli=resolve('node_modules/.bin/pi');
@@ -29,6 +30,12 @@ test('real Pi CLI owns project-local package install, discovery/listing and remo
  // Pi intentionally hides project packages in noninteractive commands until project trust is granted.
  assert.match(invoke(project,env,'list','--approve'),/reroute/i);
  assert.match(invoke(project,env,'list','--no-approve'),/No packages installed/);
+  const loaded=await sdk.discoverAndLoadExtensions([join(root,'adapters','pi.ts')],project,agent);
+  assert.deepEqual(loaded.errors,[]);
+  const extension=loaded.extensions[0];
+  assert.deepEqual([...extension.tools.keys()],['reroute_run']);
+  assert.ok(extension.commands.has('reroute'));
+  assert.equal(extension.handlers.has('user_bash'),false);
  await assert.rejects(stat(join(agent,'extensions','reroute.ts')), /ENOENT/);
  await assert.rejects(stat(join(agent,'settings.json')), /ENOENT/);
  invoke(project,env,'remove','--local','--approve',root);
