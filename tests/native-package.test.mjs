@@ -33,7 +33,7 @@ test('real Pi CLI owns project-local package install, discovery/listing and remo
   const loaded=await sdk.discoverAndLoadExtensions([join(root,'adapters','pi.ts')],project,agent);
   assert.deepEqual(loaded.errors,[]);
   const extension=loaded.extensions[0];
-  assert.deepEqual([...extension.tools.keys()],['reroute_run']);
+  assert.deepEqual([...extension.tools.keys()],['reroute_run','reroute_status']);
   assert.ok(extension.commands.has('reroute'));
   assert.equal(extension.handlers.has('user_bash'),false);
  await assert.rejects(stat(join(agent,'extensions','reroute.ts')), /ENOENT/);

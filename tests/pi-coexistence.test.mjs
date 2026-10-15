@@ -77,14 +77,19 @@ async function coexistence(order, aftPath) {
     assert.deepEqual(result.extensionsResult.extensions.map(ext => ext.path), paths);
     const reroute = result.extensionsResult.extensions.find(ext => ext.path === adapter);
     const shell = result.extensionsResult.extensions.find(ext => ext.path === bashExtension);
-    assert.deepEqual([...reroute.tools.keys()], ['reroute_run']);
+    assert.deepEqual([...reroute.tools.keys()], ['reroute_run', 'reroute_status']);
+    assert.ok(reroute.commands.has('reroute'));
     assert.equal(reroute.handlers.has('user_bash'), false);
     assert.equal(reroute.handlers.has('tool_call'), false);
     if (!aftPath) assert.deepEqual([...shell.tools.keys()], ['bash']);
     assert.equal(session.getToolDefinition('bash'), shell.tools.get('bash').definition);
-    assert.equal(session.getToolDefinition('reroute_run'), reroute.tools.get('reroute_run').definition);
-    assert.equal(session.getToolDefinition('reroute_run').exposure, 'direct');
-    assert.equal(session.getToolDefinition('reroute_run').defaultActive, true);
+    for (const name of ['reroute_run', 'reroute_status']) {
+      assert.equal(session.getToolDefinition(name), reroute.tools.get(name).definition);
+      assert.equal(session.getToolDefinition(name).exposure, 'direct');
+      assert.equal(session.getToolDefinition(name).defaultActive, true);
+      assert.ok(session.getActiveToolNames().includes(name));
+      assert.ok(session.getCallableToolNames().includes(name));
+    }
     // No explicit tool allowlist or activation: verify the actual default session loadout.
     assert.ok(session.getActiveToolNames().includes('bash'));
     assert.ok(session.getActiveToolNames().includes('reroute_run'));
@@ -111,6 +116,11 @@ async function coexistence(order, aftPath) {
     assert.equal(refused.isError, true);
     assert.equal(refused.result.structuredContent.status, 'not_started');
     assert.match(refused.result.structuredContent.reason, /Nothing executed/);
+    const missing = await ctx.executeTool('reroute_status', { jobId: '00000000-0000-0000-0000-000000000000' });
+    assert.equal(missing.isError, true);
+    assert.equal(missing.result.structuredContent.remoteConfirmed, false);
+    assert.equal(missing.result.structuredContent.recordedStatus, null);
+    assert.match(missing.result.structuredContent.error, /Unknown job ID/);
     if (aftPath) assert.equal(outcome.result.details.exit_code, 0);
     assert.deepEqual(errors, []);
     assert.equal(modelCalls, 0);

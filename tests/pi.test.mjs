@@ -8,17 +8,27 @@ import { createRerouteTool, panel } from '../dist/pi.js';
 import { defaults, saveConfig, loadConfig } from '../dist/config.js';
 import { setup } from '../dist/setup.js';
 
-test('actual Pi extension loader registers only independent reroute_run and /reroute',async t=>{
+test('actual Pi extension loader registers independent run/status tools and /reroute',async t=>{
  const root=await mkdtemp(join(tmpdir(),'reroute-pi-load-')),agent=join(root,'agent');await mkdir(agent);t.after(()=>rm(root,{recursive:true,force:true}));
  const result=await sdk.discoverAndLoadExtensions([resolve('adapters/pi.ts')],root,agent);
  assert.deepEqual(result.errors,[]);const ext=result.extensions.find(e=>e.path.endsWith('adapters/pi.ts'));assert.ok(ext);
- assert.deepEqual([...ext.tools.keys()],['reroute_run']);assert.ok(ext.commands.has('reroute'));
+ assert.deepEqual([...ext.tools.keys()],['reroute_run','reroute_status']);assert.ok(ext.commands.has('reroute'));
  assert.equal(ext.handlers.has('user_bash'),false);assert.equal(ext.handlers.has('tool_call'),false);
  const tool=ext.tools.get('reroute_run').definition;
  assert.equal(tool.exposure,'direct');assert.equal(tool.defaultActive,true);
  assert.deepEqual(Object.keys(tool.parameters.properties),['command','timeout']);
  assert.deepEqual(tool.parameters.required,['command']);
  assert.match(tool.description,/configured Reroute execution environment/);
+ assert.match(tool.description,/one independent/);assert.match(tool.description,/&&, pipes, redirects/);
+ assert.match(tool.promptGuidelines.join(' '),/wait for the previous task to succeed/);
+ assert.match(tool.promptGuidelines.join(' '),/stop dependent tasks/);
+ assert.match(tool.promptGuidelines.join(' '),/first call reroute_status/);
+ const status=ext.tools.get('reroute_status').definition;
+ assert.equal(status.exposure,'direct');assert.equal(status.defaultActive,true);
+ assert.deepEqual(Object.keys(status.parameters.properties),['jobId']);
+ assert.deepEqual(status.parameters.required,['jobId']);assert.equal(status.parameters.additionalProperties,false);
+ assert.match(status.description,/without the optional CLI/);
+ assert.match(status.promptGuidelines.join(' '),/Recorded history is not current confirmation/);
  assert.match(tool.promptSnippet,/bash/);assert.match(tool.promptGuidelines.join(' '),/user authorization/);
 });
 test('ordinary native Bash remains local with native failure and truncation semantics',async t=>{
