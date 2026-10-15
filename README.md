@@ -2,7 +2,7 @@
 
 **Keep editing locally in WSL2 and using Pi normally. Send eligible builds and tests to existing remote compute.**
 
-Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands stay local. Failed remote jobs never silently retry locally.
+Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands are not automatically offloaded (use ordinary Bash in Pi). Failed remote jobs never silently retry locally.
 
 **Status:** 0.3.0-native.4 candidate. SSH is tested through real OpenSSH and rsync on an isolated Ubuntu localhost server in CI. Other cloud providers are implemented and contract-tested, but their real account integrations are **LIVE UNVERIFIED**.
 
@@ -49,7 +49,7 @@ The standalone CLI manages only `.reroute.json` and the opt-in private credentia
 
 ### Migrating from the earlier handwritten extension
 
-Earlier Reroute candidates installed `~/.pi/agent/extensions/reroute.ts` globally. Before enabling the new native package, inspect that file. **Only remove it if its first line is `// Reroute v3 owned extension entry`**; leave unowned or modified files untouched. The new installer does not delete any global extensions automatically. Duplicate global/project registration could cause conflicts.
+Earlier Reroute candidates installed `~/.pi/agent/extensions/reroute.ts` globally. Before enabling the new native package, inspect that file. **Only remove it if its first line is `// Reroute v3 owned extension entry`**; leave unowned or modified files untouched. The new installer does not delete any global extensions automatically. Duplicate global/project registration could cause conflicts, and an old entry may still override Bash. Updating the native package does not retire a separate historical extension. Restart Pi (or reload extensions) after updating; no reinstall is normally needed for an existing branch-based native package. Before this PR is merged, try the feature branch with `pi install -l git:github.com/onedotmint/Reroute@feat/pi-independent-tool` in a trusted test project.
 
 ## Friendly setup and Pi control panel
 
@@ -95,9 +95,32 @@ reroute status JOB_ID
 reroute cancel JOB_ID
 ~~~
 
-Pi's ordinary Bash runs through the same router after installation. The `/reroute` menu shows all saved profiles, credential sources, routing mode, recent jobs and on-demand connection/resource controls. The CLI and Pi share the project config. A confirmed timeout returns 124, a confirmed cancellation returns 130, and infrastructure/unknown/incomplete output returns 125. A remote failure is **never** retried locally without your action.
+### Independent Pi tool
 
-Automatic classification fails closed: unrecognized scripts, redirects, pipes, expansions, working-directory changes, watch servers, deployment/publishing and other side-effect commands stay local. To override explicitly use `reroute exec`. Use `reroute --help` for setup flags, diagnostics and resource management.
+**AFT or Pi handles ordinary Bash execution. The Pi Package includes independent `reroute_run` and `reroute_status` tools; the standalone CLI is optional.** Both tools are active by default after trusted package loading. Reroute does not register/override `bash`, handle `user_bash`, rewrite other tools' calls, or hook process spawning. AFT requires no changes or special load order.
+
+The execution tool accepts `{ command: "cargo test", timeout: 120 }` (timeout optional, in seconds, up to 86400; otherwise the project's timeout). Submit **one independent, eligible compute command per call**, without `&&`, pipes, redirects or complex shell combinations. For dependent tasks, call the tool separately, wait for the preceding task to succeed, and stop dependent tasks if it fails or remains unknown. It uses Pi's current project working directory and the same `.reroute.json`, conservative router, snapshots and execution engine as the CLI. `/reroute` still configures and manages providers interactively; ordinary shell, Git and file operations, authentication, deployment and interactive commands remain with Pi/AFT `bash`.
+
+A local routing decision (including `mode=local`), an unconfigured project or an ineligible command produces `not_started` with the reason: **nothing is run locally or remotely by the tool**. The model may use existing Bash when local execution is intended. This differs from standalone `reroute run`, which retains its explicit CLI local-routing behavior. There is no implicit local fallback and no automatic cloud creation/start/resume.
+
+Results include status, exit code, Job ID (if allocated), separate stdout/stderr and errors, in text and structured data. Progress is bounded and throttled. Only the final 8192 characters of each output stream are retained (long diagnostics are bounded too); truncation is explicitly reported, and the tool does not save full logs. Arrange explicit output artifacts when a complete record is needed. A confirmed timeout returns 124, a confirmed cancellation returns 130, and infrastructure/unknown/incomplete output returns 125. A failed or uncertain remote task is **never** retried locally: inspect its Job ID with `reroute_status({ jobId: "..." })` (no CLI required) and obtain user authorization before a local rerun.
+
+**Model tool selection is not deterministic command interception.** Registration makes the tool available; it does not guarantee that the model discovers or chooses it for every eligible task. Automated loading tests do not prove real-model selection accuracy.
+
+Automatic classification fails closed: unrecognized scripts, redirects, pipes, expansions, working-directory changes, watch servers, deployment/publishing and other side-effect commands are not automatically offloaded. To override explicitly use `reroute exec`. Use `reroute --help` for setup flags, diagnostics and resource management.
+
+### Job status without the CLI
+
+Call `reroute_status({ jobId: "..." })` after an execution failure or unknown result. This tool accepts only `jobId` and only queries jobs belonging to the canonical current project root, including calls from nested directories or filesystem aliases. Invalid, missing and cross-project jobs fail without contacting a provider or revealing a foreign job's details.
+
+The result explicitly separates:
+
+- `recordedStatus`, `recordedExitCode`, `recordedError`: the local record captured **before** this query; not a claim about the current remote state.
+- `remoteConfirmed`: true only after obtaining a valid, non-unknown task status response. Resource availability alone is insufficient. `remoteStatus` is null when unconfirmed.
+- `exitCode`: the fresh response's exit code when confirmed (null for a nonterminal response), or the last recorded exit code when unconfirmed; null means unavailable. Read it together with `remoteConfirmed`.
+- `error`: a verification/persistence diagnostic; an unsuccessful verification is an error result even when the saved job previously exited successfully. A successful query of an exited job with a nonzero code does not mean its computation succeeded.
+
+Queries have a 30-second client deadline and may refresh the local receipt, but never start/resume resources, create/retry/cancel/clean tasks, or change project configuration/credentials. They use only the existing provider availability and task-status mechanisms. **A disconnection, timeout, invalid receipt or remote `unknown` response cannot establish completion or termination.** The tool returns the authorized last-known record with an explicit failed-verification indication; it cannot guarantee recovery of live state while disconnected. For E2B, native task verification currently fails closed even when the resource is online: the existing adapter uses a connection API that may resume a concurrently paused sandbox. No such connection is attempted by this tool. Do not rerun locally without user authorization.
 
 ## Source inputs, caching and artifacts
 
@@ -118,7 +141,7 @@ Artifact downloads are checksum-verified tar.gz archives, limited to 256 MiB, an
 
 - `reroute doctor --json` checks local requirements; `reroute doctor --connect` probes an existing target, without provisioning it.
 - `reroute resource resume --yes --allow-cost` may incur costs; `reroute resource stop --yes` or `destroy --yes` are explicit. Running/unknown jobs prevent destructive lifecycle actions.
-- On an `unknown` task, inspect `reroute status JOB_ID` and native provider logs before deciding to rerun. Network loss is not proof that remote execution stopped.
+- On an `unknown` task, use `reroute_status({ jobId: "..." })` in Pi (or optional CLI `reroute status JOB_ID`) and native provider logs before deciding to rerun. Network loss is not proof that remote execution stopped.
 - Older 0.2 synchronization state is not deleted or migrated. Recover any pending files through the legacy version before using `reroute setup --ignore-legacy`.
 - Files sent to remote should not contain credentials. Automatic exclusions are defensive, not a secrets scanner. Run on least-privilege isolated compute.
 - Real user WSL2 Pi extension startup, cross-machine network performance and all four cloud backends remain to be tested. See [DELIVERY.md](./DELIVERY.md).

@@ -1,22 +1,159 @@
-import type { BashOperations, ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
-import { activeProfile, defaults, hasLegacy, loadConfig, saveConfig, listJobs, validate } from './config.js';
+import { defineTool, type ExtensionAPI, type ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
+import { Type } from '@earendil-works/pi-ai';
+import { StringDecoder } from 'node:string_decoder';
+import { realpath } from 'node:fs/promises';
+import { activeProfile, defaults, hasLegacy, loadConfig, saveConfig, listJobs, getJob, projectRoot, validate } from './config.js';
 import { credentialStatus, forgetProviderSecrets } from './auth.js';
 import { discoverExisting } from './discovery.js';
 import { PROVIDERS, type Config, type Profile, type ProviderId, type Job } from './types.js';
-import { runRemote, resourceAction } from './engine.js';
+import { runRemote, resourceAction, inspectJob } from './engine.js';
 import { ruleRouter } from './router.js';
 import { doctor } from './doctor.js';
-type PiSDK = Pick<typeof import('@earendil-works/pi-coding-agent'), 'createBashTool' | 'createBashToolDefinition' | 'createLocalBashOperations'>;
-export function createRerouteOperations(local: BashOperations, execute = runRemote): BashOperations {
-  return {exec:async(command,cwd,options)=>{
-    const {root,config}=await loadConfig(cwd);
-    if (!config || (await ruleRouter(command,cwd,config)).route==='local') return local.exec(command,cwd,options);
-    const result=await execute(command,{root,config,cwd,signal:options.signal,timeoutMs:options.timeout===undefined?undefined:options.timeout*1000,
-      stdout:options.onData,stderr:options.onData});
-    if(result.job.error)options.onData(Buffer.from(`\n[Reroute ${result.job.id}: ${result.job.status}] ${result.job.error}\n`));
-    else if(result.job.status!=='exited')options.onData(Buffer.from(`\n[Reroute ${result.job.id}: ${result.job.status}]\n`));
-    return {exitCode:result.code};
-  }};
+// Keep the Pi entry independent of Bash: local decisions are refusals, never implicit execution.
+export function createRerouteTool(execute = runRemote) {
+  return defineTool({
+    name: 'reroute_run',
+    label: 'Reroute',
+    description: "Run one independent, eligible build/test/check/compute command using the project's configured Reroute execution environment. Do not submit &&, pipes, redirects or complex shell combinations. Run dependent tasks separately, waiting for each to succeed; stop dependent tasks on failure. Local-mode, unconfigured and ineligible commands are not executed. Ordinary shell, Git and file operations remain with Pi/AFT bash. After remote failure or unknown state, use reroute_status with the Job ID; never retry locally without user authorization.",
+    promptSnippet: 'Run one eligible compute command at a time; query failed/unknown jobs with reroute_status. Ordinary shell/Git/file operations use Pi/AFT bash.',
+    promptGuidelines: [
+      'Prefer reroute_run for eligible compute tasks. Submit one independent command, never &&, pipes, redirects or complex shell combinations.',
+      'For dependent tasks, call reroute_run separately and wait for the previous task to succeed before continuing. If it fails or its state is unknown, stop dependent tasks.',
+      'Use Pi/AFT bash for ordinary shell, Git and file operations, deployment, authentication, interactive shells and commands with unknown side effects.',
+      'reroute_run respects project routing and may decline a task. It never provisions or resumes resources automatically, or falls back to local execution.',
+      'After a remote failure or unknown state, first call reroute_status with the reported Job ID; no standalone CLI is required. Never rerun failed or uncertain remote tasks in local bash without user authorization. Tool selection is not deterministic command interception.',
+    ],
+    exposure: 'direct',
+    defaultActive: true,
+    parameters: Type.Object({
+      command: Type.String({ minLength: 1, description: 'A single eligible compute command, evaluated by the project router.' }),
+      timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 86400, description: 'Task timeout in seconds; defaults to project configuration.' })),
+    }),
+    outputSchema: Type.Object({
+      status: Type.String(), exitCode: Type.Union([Type.Number(), Type.Null()]),
+      jobId: Type.Union([Type.String(), Type.Null()]), reason: Type.Union([Type.String(), Type.Null()]),
+      stdout: Type.String(), stderr: Type.String(), outputTruncated: Type.Boolean(),
+    }),
+    async execute(_id, params, signal, onUpdate, ctx) {
+      let job: Job | undefined;
+      let stdout = '', stderr = '', outputTruncated = false, lastUpdate = 0;
+      const outDecoder = new StringDecoder('utf8'), errDecoder = new StringDecoder('utf8');
+      const append = (channel: 'stdout' | 'stderr', text: string) => {
+        const value = (channel === 'stdout' ? stdout : stderr) + text;
+        outputTruncated ||= value.length > 8192;
+        if (channel === 'stdout') stdout = value.slice(-8192); else stderr = value.slice(-8192);
+      };
+      const result = (status: string, exitCode: number | null, reason?: string, isError = false) => {
+        if (reason && reason.length > 8192) { reason = '[Diagnostic truncated] ' + reason.slice(-8192); outputTruncated = true; }
+        const details = { status, exitCode, jobId: job?.id ?? null, reason: reason ?? null, stdout, stderr, outputTruncated };
+        const text = ['Reroute status: ' + status, 'Exit code: ' + (exitCode ?? 'not available'),
+          ...(job ? ['Job ID: ' + job.id] : []), ...(reason ? [reason] : []),
+          ...(stdout ? ['stdout:\n' + stdout] : []), ...(stderr ? ['stderr:\n' + stderr] : []),
+          ...(outputTruncated ? ['[Output truncated: only the last 8192 characters per stream/diagnostic are retained. Full output is not saved by this tool.]'] : []),
+        ].join('\n');
+        return { content: [{ type: 'text' as const, text }], details, structuredContent: details, isError };
+      };
+      const progress = () => {
+        if (onUpdate && Date.now() - lastUpdate >= 250) {
+          lastUpdate = Date.now();
+          onUpdate(result(job?.status ?? 'preparing', null));
+        }
+      };
+      try {
+        signal?.throwIfAborted();
+        if (!params.command.trim()) throw new Error('Command must not be blank');
+        if (params.timeout !== undefined && (!Number.isFinite(params.timeout) || params.timeout <= 0 || params.timeout > 86400))
+          throw new Error('Task timeout must be in (0, 86400] seconds');
+        const { root, config } = await loadConfig(ctx.cwd);
+        const decision = config ? await ruleRouter(params.command, ctx.cwd, config) : { route: 'local', reason: 'not-configured' };
+        if (decision.route === 'local') return result('not_started', null,
+          decision.reason + '. Nothing executed. Use bash if local execution is intended; configure /reroute for eligible remote tasks.', true);
+        const remote = await execute(params.command, {
+          root, config, cwd: ctx.cwd, signal,
+          timeoutMs: params.timeout === undefined ? undefined : params.timeout * 1000,
+          onJob: value => { job = value; progress(); },
+          stdout: chunk => { append('stdout', outDecoder.write(chunk)); progress(); },
+          stderr: chunk => { append('stderr', errDecoder.write(chunk)); progress(); },
+        });
+        job = remote.job;
+        append('stdout', outDecoder.end()); append('stderr', errDecoder.end());
+        // Providers normally stream; retain bounded returned output if no callbacks were made.
+        if (!stdout) append('stdout', remote.stdout);
+        if (!stderr) append('stderr', remote.stderr);
+        outputTruncated ||= !!(remote.stdoutTruncated || remote.stderrTruncated);
+        return result(job.status, remote.code, job.error,
+          remote.code !== 0 || job.status !== 'exited' || !!job.error);
+      } catch (error) {
+        append('stdout', outDecoder.end()); append('stderr', errDecoder.end());
+        return result(job?.status ?? (signal?.aborted ? 'cancelled' : 'failed'), job ? 125 : null,
+          String(error) + '. Never retried locally.', true);
+      }
+    },
+  });
+}
+
+/** Query only this project's jobs; a saved record is not a fresh remote confirmation. */
+export function createRerouteStatusTool(inspect = inspectJob) {
+  return defineTool({
+    name: 'reroute_status',
+    label: 'Reroute status',
+    description: "Query a Job belonging to the current Pi project without the optional CLI. Separates the last local record from a fresh remote task receipt; an online resource alone is not task confirmation. Read-only remotely: never starts/resumes resources, runs/retries/cancels/cleans tasks or changes project configuration. A failed check does not prove the task stopped; never rerun locally without user authorization.",
+    promptSnippet: 'Check failed or uncertain Reroute jobs by Job ID, without a standalone CLI; distinguish recorded history from remote confirmation.',
+    promptGuidelines: [
+      'After reroute_run fails or reports unknown, use reroute_status with its Job ID before deciding what to do next.',
+      'Only remoteConfirmed=true establishes a fresh remote task status. Recorded history is not current confirmation, and query success does not mean the task succeeded.',
+      'If verification fails or the task remains unknown, do not infer completion or retry locally without user authorization.',
+    ],
+    exposure: 'direct',
+    defaultActive: true,
+    parameters: Type.Object({ jobId: Type.String({ minLength: 1, description: 'Job ID returned by reroute_run in this project.' }) }, { additionalProperties: false }),
+    outputSchema: Type.Object({
+      jobId: Type.String(), recordedStatus: Type.Union([Type.String(), Type.Null()]),
+      recordedExitCode: Type.Union([Type.Number(), Type.Null()]), recordedError: Type.Union([Type.String(), Type.Null()]),
+      remoteConfirmed: Type.Boolean(), remoteStatus: Type.Union([Type.String(), Type.Null()]),
+      exitCode: Type.Union([Type.Number(), Type.Null()]), error: Type.Union([Type.String(), Type.Null()]),
+    }),
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      let recorded: Job | undefined, confirmed: Job | undefined, error: string | null = null;
+      const diagnostic = (value: unknown) => String(value).slice(-8192);
+      try {
+        signal?.throwIfAborted();
+        const root = await realpath(await projectRoot(await realpath(ctx.cwd)));
+        let job: Job;
+        try { job = await getJob(params.jobId); }
+        catch (cause) {
+          if (cause instanceof Error && ['Invalid job ID', 'Unknown job ID'].includes(cause.message)) throw cause;
+          throw new Error('Could not read the local Job record');
+        }
+        if (!job || job.id !== params.jobId || await realpath(job.project).catch(() => null) !== root)
+          throw new Error('Job does not belong to the current Pi project');
+        recorded = job;
+        const querySignal = AbortSignal.any([AbortSignal.timeout(30000), ...(signal ? [signal] : [])]);
+        const current = await inspect(params.jobId, 'status', {
+          project: root, signal: querySignal, onConfirmed: value => { confirmed = value; },
+        });
+        if (current.error) error = diagnostic(current.error);
+        else if (!confirmed) error = 'Remote task status could not be confirmed. Last recorded state shown.';
+      } catch (cause) { error = diagnostic(cause); }
+      const details = {
+        jobId: params.jobId, recordedStatus: recorded?.status ?? null,
+        recordedExitCode: recorded?.code ?? null, recordedError: recorded?.error ? diagnostic(recorded.error) : null,
+        remoteConfirmed: !!confirmed, remoteStatus: confirmed?.status ?? null,
+        exitCode: (confirmed ? confirmed.code : recorded?.code) ?? null, error,
+      };
+      const text = [
+        'Job ID: ' + details.jobId,
+        'Last recorded status: ' + (details.recordedStatus ?? 'not available'),
+        'Last recorded exit code: ' + (details.recordedExitCode ?? 'not available'),
+        'Remote status confirmed: ' + (details.remoteConfirmed ? 'yes' : 'no'),
+        'Remote status: ' + (details.remoteStatus ?? 'not confirmed'),
+        'Known exit code (' + (confirmed ? 'remote receipt' : 'last local record') + '): ' + (details.exitCode ?? 'not available'),
+        ...(details.recordedError ? ['Recorded diagnostic: ' + details.recordedError] : []),
+        ...(error ? ['Verification diagnostic: ' + error] : []),
+      ].join('\n');
+      return { content: [{ type: 'text' as const, text }], details, structuredContent: details, isError: !!error || !confirmed };
+    },
+  });
 }
 
 /** Local-only summary. Opening /reroute never contacts a provider or resumes compute. */
@@ -218,11 +355,8 @@ export async function panel(ctx: ExtensionCommandContext): Promise<void> {
     }
   }
 }
-export function registerPi(pi: ExtensionAPI, sdk: PiSDK): void {
-  if(typeof sdk.createBashTool!=='function'||typeof sdk.createLocalBashOperations!=='function')throw new Error('Reroute needs Pi native BashOperations support; no fallback shim was installed');
-  const operations=createRerouteOperations(sdk.createLocalBashOperations());
-  const factory=sdk.createBashToolDefinition??sdk.createBashTool;
-  pi.registerTool(factory(process.cwd(),{operations}));
-  pi.on('user_bash',()=>({operations}));
+export function registerPi(pi: ExtensionAPI): void {
+  pi.registerTool(createRerouteTool());
+  pi.registerTool(createRerouteStatusTool());
   pi.registerCommand('reroute',{description:'Reroute provider, routing and resource controls (no model calls)',handler:async(_args,ctx)=>panel(ctx)});
 }

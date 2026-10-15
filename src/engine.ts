@@ -19,8 +19,11 @@ export async function helperCommand(action: string, data: Record<string, unknown
   return shell(['python3', '-c', await helperSource, action, Buffer.from(JSON.stringify(data)).toString('base64')]);
 }
 type Receipt = { status: JobStatus; code?: number; error?: string };
-async function control<T>(provider: Provider, action: string, job: Pick<Job, 'root' | 'id'>, extra: Record<string,unknown> = {}): Promise<T> {
-  const r = await requireSuccess(provider.exec(await helperCommand(action, { root: job.root, id: job.id, ...extra }), { timeoutMs: action === 'cancel' ? 15000 : 120000 }));
+async function control<T>(provider: Provider, action: string, job: Pick<Job, 'root' | 'id'>, extra: Record<string,unknown> = {}, options: ExecOptions = {}): Promise<T> {
+  options.signal?.throwIfAborted();
+  const command = await helperCommand(action, { root: job.root, id: job.id, ...extra });
+  options.signal?.throwIfAborted();
+  const r = await requireSuccess(provider.exec(command, { timeoutMs: action === 'cancel' ? 15000 : 120000, ...options }));
   if (r.stdoutTruncated) throw new Error(`Truncated remote ${action} response; state not confirmed`);
   try { return JSON.parse(r.stdout) as T; } catch { throw new Error(`Invalid or truncated remote ${action} response; state not confirmed`); }
 }
@@ -131,12 +134,60 @@ export async function runRemote(command: string, options: RunOptions): Promise<R
   } finally { await input.cleanup(); await rm(controlDir, { recursive: true, force: true }); await provider.close?.(); }
 }
 
-export async function inspectJob(id: string, action: 'status' | 'cancel' = 'status'): Promise<Job> {
-  const job = await getJob(id), provider = createProvider(job.profile);
+export async function inspectJob(id: string, action: 'status' | 'cancel' = 'status', options: {
+  project?: string; signal?: AbortSignal; provider?: Provider; onConfirmed?: (job: Job) => void;
+} = {}): Promise<Job> {
+  const { signal } = options;
+  signal?.throwIfAborted();
+  if (action !== 'status' && action !== 'cancel') throw new Error('Invalid inspection action');
+  let job: Job;
   try {
-    const state = await provider.status();
+    job = await getJob(id);
+    if (!job || job.id !== id) throw new Error('Job not found in this project');
+    if (options.project !== undefined && await realpath(job.project) !== await realpath(options.project)) throw new Error('Job not found in this project');
+  } catch (error) {
+    if (options.project !== undefined) throw new Error('Job not found in this project');
+    throw error;
+  }
+  signal?.throwIfAborted();
+  const provider = options.provider ?? createProvider(job.profile);
+  // A provider may ignore AbortSignal; race the query without letting its late result advance inspection.
+  async function query<T>(operation: () => Promise<T>): Promise<T> {
+    signal?.throwIfAborted();
+    let abort: (() => void) | undefined;
+    try {
+      return await new Promise<T>((resolve, reject) => {
+        abort = () => reject(signal!.reason);
+        signal?.addEventListener('abort', abort, { once: true });
+        Promise.resolve().then(() => { signal?.throwIfAborted(); return operation(); }).then(resolve, reject);
+      });
+    } finally { if (abort) signal?.removeEventListener('abort', abort); }
+  }
+  try {
+    const state = await query(() => provider.status());
+    signal?.throwIfAborted();
     if (state !== 'running') return { ...job, error: `Resource ${state}; no command, connect, or implicit resume performed. Last recorded state shown.` };
-    Object.assign(job, await control<Receipt>(provider, action, job)); await saveJob(job); return job;
+    // E2B connect may resume a concurrently paused sandbox; scoped read-only inspection must fail closed.
+    if (options.project !== undefined && action === 'status' && job.profile.provider === 'e2b')
+      return { ...job, error: 'E2B task verification unavailable: the existing connection API may resume a sandbox. No connection attempted. Last recorded state shown.' };
+    const receipt = await query(() => control<unknown>(provider, action, job, {}, { signal }));
+    signal?.throwIfAborted();
+    if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) throw new Error('Invalid remote receipt; state not confirmed');
+    const { status, code, error } = receipt as Record<string, unknown>;
+    if (typeof status !== 'string' || !['preparing','running','exited','cancelled','timed_out','failed','unknown'].includes(status)
+      || (error !== undefined && typeof error !== 'string')
+      || (code !== undefined && (!Number.isSafeInteger(code) || (code as number) < 0 || (code as number) > 255))
+      || (terminal(status) && code === undefined)
+      || (['preparing','running'].includes(status) && code !== undefined)) throw new Error('Invalid remote receipt; state not confirmed');
+    delete job.code; delete job.error;
+    job.status = status as JobStatus;
+    if (code !== undefined) job.code = code as number;
+    if (typeof error === 'string') job.error = error;
+    if (status === 'unknown') job.error ??= 'Remote task state is not confirmed. Last query returned unknown; do not rerun blindly.';
+    else options.onConfirmed?.(job);
+    signal?.throwIfAborted();
+    await saveJob(job);
+    return job;
   } finally { await provider.close?.(); }
 }
 export async function downloadArtifact(id: string, path: string, destination: string): Promise<string> {

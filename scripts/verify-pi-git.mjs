@@ -33,7 +33,10 @@ try {
   const result=await sdk.discoverAndLoadExtensions([join(pkg,'adapters','pi.ts')],project,agent);
   assert.deepEqual(result.errors,[],'Pi must actually load the Git-installed source extension');
   assert.ok(result.extensions[0]?.commands.has('reroute'));
-  assert.ok(result.extensions[0]?.tools.has('bash'));
+  assert.ok(result.extensions[0]?.tools.has('reroute_run'));
+   assert.ok(result.extensions[0]?.tools.has('reroute_status'));
+  assert.equal(result.extensions[0]?.tools.has('bash'),false);
+  assert.equal(result.extensions[0]?.handlers.has('user_bash'),false);
   assert.match(pi('list','--approve'),/Reroute/i);
   assert.match(pi('list','--no-approve'),/No packages installed/);
   await assert.rejects(stat(join(agent,'extensions','reroute.ts')),/ENOENT/);
@@ -41,7 +44,7 @@ try {
   pi('remove','--local','--approve',source);
   const after=JSON.parse(await readFile(join(project,'.pi','settings.json'),'utf8'));
   assert.equal(after.packages?.length??0,0);
-  console.log(JSON.stringify({commit:sha,source,scope:'project',sourceOnly:true,extensionLoaded:true,registeredCommand:'/reroute',removed:true,globalPiUntouched:true}));
+  console.log(JSON.stringify({commit:sha,source,scope:'project',sourceOnly:true,extensionLoaded:true,registeredCommand:'/reroute',registeredTools:['reroute_run','reroute_status'],bashOverride:false,removed:true,globalPiUntouched:true}));
 } finally {
   await rm(root,{recursive:true,force:true});
 }
