@@ -1,10 +1,11 @@
 {
-  "name": "reroute",
+  "name": "@onedotmint/reroute",
   "version": "0.3.0",
   "description": "Keep Pi and source local; offload build, test and compute through native remote tools",
   "keywords": ["pi-package", "pi-extension", "remote-builds", "development-tools"],
   "type": "module",
   "license": "Apache-2.0",
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "repository": { "type": "git", "url": "git+https://github.com/onedotmint/Reroute.git" },
   "engines": { "node": ">=22.19.0" },
   "bin": { "reroute": "bin/reroute.mjs" },
