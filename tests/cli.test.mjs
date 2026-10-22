@@ -42,3 +42,11 @@ test('credential inspection and forgetting are explicit and never display key va
  assert.equal(body.scope.includes('local private file'),true);
  assert.equal(body.provider,'daytona');
 });
+
+test('reported version comes from package.json, never a hardcoded literal',async t=>{
+ const {run}=await fixture(t);
+ const pkg=JSON.parse(await readFile(resolve('package.json'),'utf8'));
+ const out=await run('--version');
+ assert.equal(out.code,0);
+ assert.equal(out.stdout.trim(),pkg.version);
+});

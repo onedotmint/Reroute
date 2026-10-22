@@ -2,7 +2,7 @@
 
 **Canonical source:** [rebuild/0.3-native](https://github.com/onedotmint/Reroute/tree/rebuild/0.3-native); main and the original 0.2 branch are unchanged. The precise final commit SHA is recorded in each successful CI archive's `COMMIT.txt` / `package-verification.json`, and in the GitHub run's head SHA. Always match those values to the requested source ref. This versioned ledger does not falsely describe an older checkpoint as the final SHA.
 
-**Build:** npm version `0.3.0-native.4`, `npm pack` to `reroute-0.3.0-native.4.tgz`. CI runs locked `npm ci`, strict types/build, tests, real localhost SSH, benchmark, real pack + clean-prefix install/smoke, then uploads the tarball and evidence as `reroute-npm-node-<node>-<sha>`, retention 30 days. No npm publish or GitHub Release.
+**Build:** npm version `0.3.0`, `npm pack` to `reroute-0.3.0.tgz`. CI runs locked `npm ci`, strict types/build, tests, real localhost SSH, benchmark, real pack + clean-prefix install/smoke, then uploads the tarball and evidence as `reroute-npm-node-<node>-<sha>`, retention 30 days. No npm publish or GitHub Release.
 
 **Architecture removal (0.2 → 0.3):** removed resident daemon, generic multi-way synchronization and source writeback, merge conflict states, remote dev server/preview, unrelated adapters and legacy protocol. Retained native Pi integration (now an independent compute tool, not a Bash interface), Clack setup, conservative command classification, direct compute providers; rebuilt one-way snapshots and a small task supervisor. Uses OpenSSH, rsync, official Daytona/Modal/E2B SDKs, SkyPilot CLI, Pi SDK and TypeScript; no LLM client.
 
@@ -10,7 +10,7 @@
 
 | | |
 |---|---|
-| Version | `0.3.0-native.4` development candidate |
+| Version | `0.3.0` development candidate |
 | Merged | `rebuild/0.3-native` at merge commit `2382dc5` (PR #2, 2026-10-22T06:19:55Z) |
 | Released | **No.** No npm publish, GitHub Release or git tag |
 | Tests | **198 passed / 0 failed / 0 skipped**, plus real localhost SSH/rsync **7/7** and offline smoke with `cloudCalls: 0` |
@@ -69,7 +69,7 @@ Everything below this table is history, newest last. It records what was true at
 
 **Known limits:** input snapshots are double-checked but not filesystem-atomic; Git index capture is capped at 1 MiB, total input at 512 MiB, each file at 256 MiB; artifact archive at 256 MiB. Symlink inputs rejected. Shared project execution is serialized. Cancellation or transport state can be unknown and is never reported as confirmed success. SSH host lifecycle is not supported. Per-provider live SDK/CLI behavior is still a validation gap.
 
-**Recovery/install:** use `pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native`, trust the project in Pi, and run `/reroute` to configure the project. For the optional standalone CLI, checkout the branch or use the actual successful [Verify native Reroute Actions run](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml). Download a `reroute-npm-node-<node>-<sha>` artifact, unzip, compare `COMMIT.txt` with run head SHA, install `npm install -g ./reroute-0.3.0-native.4.tgz` inside WSL2, run `reroute setup` and `reroute doctor --connect` in the project. CLI setup does not install the Pi extension; Pi does so separately. Always report missing/failed CI or live checks as such; no substitute fake tarballs.
+**Recovery/install:** use `pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native`, trust the project in Pi, and run `/reroute` to configure the project. For the optional standalone CLI, checkout the branch or use the actual successful [Verify native Reroute Actions run](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml). Download a `reroute-npm-node-<node>-<sha>` artifact, unzip, compare `COMMIT.txt` with run head SHA, install `npm install -g ./reroute-0.3.0.tgz` inside WSL2, run `reroute setup` and `reroute doctor --connect` in the project. CLI setup does not install the Pi extension; Pi does so separately. Always report missing/failed CI or live checks as such; no substitute fake tarballs.
 
 ## Independent Pi tool integration
 

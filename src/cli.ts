@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { activeProfile, loadConfig, listJobs, saveConfig } from './config.js';
 import { runRemote, inspectJob, downloadArtifact, cleanupJob, resourceAction } from './engine.js';
 import { ruleRouter } from './router.js';
@@ -62,7 +63,7 @@ export async function main(argv=process.argv.slice(2)): Promise<void> {
       'non-interactive':{type:'boolean'},provider:{type:'string'},id:{type:'string'},name:{type:'string'},root:{type:'string'},port:{type:'string'},identity:{type:'string'},app:{type:'string'},tasks:{type:'string'},'no-pi':{type:'boolean'},'ignore-legacy':{type:'boolean'},to:{type:'string'},
     }});
     const command=a[0], cwd=resolve(v.cwd??process.cwd());
-    if(v.version){console.log('0.3.0-native.4');return;}
+    if(v.version){console.log(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version);return;}
     if(v.help||!command){console.log(HELP);return;}
     if(command==='setup'){const config=await setup(cwd,{advanced:v.advanced,nonInteractive:v['non-interactive'],provider:v.provider,id:v.id,name:v.name,root:v.root,port:v.port,identity:v.identity,app:v.app,tasks:v.tasks,noPi:v['no-pi'],ignoreLegacy:v['ignore-legacy'],managed:v.managed,credential:v.credential,image:v.image,cpu:v.cpu,memory:v.memory,preset:v.preset,authorize:v.authorize,monthlyUsd:v['monthly-usd'],maxTaskUsd:v['max-task-usd'],cpuHourUsd:v['cpu-hour-usd'],memoryHourUsd:v['memory-hour-usd'],storageMonthUsd:v['storage-month-usd'],idleMinutes:v['idle-minutes'],maxCpu:v['max-cpu'],maxMemory:v['max-memory']});if(v['non-interactive'])output({saved:true,active:config.active,pi:'managed-by-native-pi'});return;}
     if(command==='pi')throw new Error('Reroute no longer writes Pi extension files. Install the native Pi package with: pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native');

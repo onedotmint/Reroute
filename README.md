@@ -4,7 +4,7 @@
 
 Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands are not automatically offloaded (use ordinary Bash in Pi). Failed remote jobs never silently retry locally.
 
-**Status:** 0.3.0-native.4 development candidate, merged into `rebuild/0.3-native` as `2382dc5` and **not yet published to npm**. Managed **Daytona is live-verified**; managed **Modal is implemented and offline-tested but has never been run against the real service**. SSH has historical real localhost OpenSSH evidence. Billing remains unverified for every provider.
+**Status:** 0.3.0 development candidate, merged into `rebuild/0.3-native` as `2382dc5` and **not yet published to npm**. Managed **Daytona is live-verified**; managed **Modal is implemented and offline-tested but has never been run against the real service**. SSH has historical real localhost OpenSSH evidence. Billing remains unverified for every provider.
 
 ## Install as a native Pi PROJECT package (recommended)
 
@@ -30,7 +30,7 @@ For noninteractive inspections, `pi list --approve` explicitly permits reading t
 
 The Git checkout does not need a built `dist/`: Pi's native TypeScript loader loads `adapters/pi.ts` and the source modules directly. A local checked-out source directory is also a native Pi package: `pi install -l /absolute/path/to/Reroute`.
 
-**Important:** Reroute is **not published to npm** yet. Do not use `pi install -l npm:reroute`. The Git ref above is the supported native package source. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `reroute-0.3.0-native.4.tgz` for the **optional standalone CLI**.
+**Important:** Reroute is **not published to npm** yet. Do not use `pi install -l npm:reroute`. The Git ref above is the supported native package source. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `reroute-0.3.0.tgz` for the **optional standalone CLI**.
 
 ### Optional CLI and masked API keys
 
@@ -39,7 +39,7 @@ The `/reroute` Pi screen can create, inspect and edit project profiles without t
 For masked API-key entry, read-only resource discovery and advanced diagnostics, install the optional CLI tarball from a successful GitHub Actions run:
 
 ~~~bash
-npm install -g ./reroute-0.3.0-native.4.tgz
+npm install -g ./reroute-0.3.0.tgz
 cd /path/to/your-project
 reroute setup
 reroute doctor --connect
