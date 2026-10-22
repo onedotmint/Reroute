@@ -28,7 +28,7 @@
 - Slimmed the Pi profile-management flow rather than adding another configuration service. Shared `validate`/`saveConfig` remain the sole configuration validation/persistence path; both Clack onboarding and Pi use the same project configuration. The masked credential wizard is kept separate because Pi text inputs are not masked.
 - Main `/reroute` menu now contains everyday overview, providers, routing mode, connection check and jobs; lifecycle stop/resume/destroy and key removal moved to **Advanced**. No resource is accessed merely by opening a menu; each potentially costly/destructive action still requires consent.
 - Canceled Pi field editing leaves the existing saved profile untouched; new tests cover cancel, provider switching and Advanced confirmation.
-- Cloud provider expansion frozen until independent real-account tests. Daytona/SkyPilot/Modal/E2B remain **experimental and LIVE UNVERIFIED**, not removed or silently disabled.
+- Cloud provider expansion frozen. **Daytona has since been verified live** (see the live-acceptance section below); SkyPilot/Modal/E2B remain **experimental and LIVE UNVERIFIED**, not removed or silently disabled.
 - The existing clean-prefix npm package check now records `installMs` and `nodeModulesKiB` in `package-verification.json`, providing a measured baseline instead of guessing WSL2 disk usage. Timing includes CI environment effects and is not a performance promise.
 
 ## Verified versus unverified
@@ -41,10 +41,10 @@
 | Rust and Node cache | Actual remote npm-ci bootstrap and Cargo cold/warm compilation tested through localhost SSH |
 | Packaging | Actual npm tarball installed into clean prefix, offline `--help` / `doctor` / smoke execution checked; final run artifact must be separately verified |
 | Performance | Synthetic 128 × 64 KiB preparation measurement and localhost SSH test timings saved as JSON in CI artifact; **no proof of real-device CPU/RAM savings or remote speedup** |
-| Daytona | Implemented, offline contract-tested; **LIVE UNVERIFIED** |
+| Daytona | **LIVE VERIFIED** on a real account, including one run on the exact merged commit `f713f52`: image build, cache save then hit, failure and retest, canonical identity exclusion, detached-descendant cleanup. Evidence in `.artifacts/live-clean-commit-acceptance.json` |
 | SkyPilot | Implemented, offline contract-tested; **LIVE UNVERIFIED** |
-| Modal | Implemented, offline contract-tested; **LIVE UNVERIFIED** |
-| E2B | Implemented, offline contract-tested; **LIVE UNVERIFIED** |
+| Modal | Implemented, offline contract-tested; **LIVE UNVERIFIED** — never run against the real service, no artifact exists |
+| E2B | Implemented, offline contract-tested; **LIVE UNVERIFIED**, and carries a known `UNRESOLVED` auto-resume race |
 | Cross-machine WSL2 / real network interruption / account billing behavior | **NOT VERIFIED** |
 
 [Historical CI run 38225923288](https://github.com/onedotmint/Reroute/actions/runs/38225923288) passed the build, tests, localhost SSH, benchmark and clean install in both Node versions, but **overall failed** at upload: `actions/upload-artifact@v4` defaults to excluding hidden directories; test files were located in `.artifacts/`. Commit `bc7bd65865b65f7fda31482b1fb8b134afd0596a` adds `include-hidden-files: true`. **Do not use that failed run as an installable artifact.**
@@ -97,7 +97,7 @@ For a different installed Pi host, also set `REROUTE_PI_SDK_PATH` to its `dist/i
 
 ## Managed daily-cloud increment (local development; not a release)
 
-- Baseline: `3076ef786e46fea15548f7ba6ecd93a9f545a68d`, `origin/rebuild/0.3-native`; independent branch `feat/0.3-daily-cloud` in `/home/dotmint/Projects/Reroute-0.3-product`. The original `refactor/workflow-0.2` worktree and its unrelated uncommitted work were not edited.
+- Baseline: `3076ef786e46fea15548f7ba6ecd93a9f545a68d`, `origin/rebuild/0.3-native`; work happened on `feat/0.3-daily-cloud`, since merged. The original `refactor/workflow-0.2` worktree and its unrelated uncommitted work were not edited.
 - Implemented opt-in Daytona resource discovery/create/start/reuse, custom and per-task specification, guarded auto-stop, retained Volume, durable allocation intent/account lease, local reservation limits and conservative recovery. Explicit user billing authorization is required; setup itself makes no managed-path cloud calls.
 - Implemented Modal App/Sandbox/Volume creation via the locked SDK, physical CPU/memory hard limits, tagged recovery and bounded lifetime. Confirmed managed tasks release compute immediately; Volume is retained. No pretend in-place lifetime extension or mutable idle timer. Existing-resource Modal snapshot resume now refuses a running old Sandbox and journals a pending creation before attempting replacement.
 - Named private credential files isolate explicitly selected accounts from environment/native/default credentials. Setup refuses credential storage inside the repository; snapshots exclude relocated named stores and native Modal tokens even if tracked. Masked Clack setup and non-secret Pi settings support managed configuration without copying a Sandbox ID. Existing SSH/SkyPilot/E2B paths remain; Pi/AFT retains ordinary Bash.
@@ -155,9 +155,9 @@ Not verified in this round: the real-model natural-selection path (`reroute_run`
 - Provider quota acceptance, Volume durability across sandbox lifetimes, native guards after a killed client, manual WSL2 Pi/TUI acceptance. Localhost OpenSSH is now covered by CI (7/7), not by this machine.
 - **E2B remains `UNRESOLVED`** (`.artifacts/security-e2b-race-result.json`): an offline SDK-shape probe found its `getInfo`/`connect` interleaving permits the documented auto-resume. Not fixed here; out of this change's scope and left as a recorded open contract gap.
 
-No merge or release was performed. The work is committed and pushed to `feat/0.3-daily-cloud` and open as [PR #2](https://github.com/onedotmint/Reroute/pull/2) against `rebuild/0.3-native`; the version remains a development candidate, not a published daily-use certification. Daytona live acceptance was performed repeatedly on pre-commit working trees; **Modal live acceptance has never been performed**, and no live run covers the current commit.
+**Merged, not released.** PR #2 was merged into `rebuild/0.3-native` as merge commit `2382dc5` (2026-10-22T06:19:55Z); the version remains a development candidate, not a published daily-use certification. No npm publish, GitHub Release or git tag was created. Daytona live acceptance was performed repeatedly, including once on the exact merged commit; **Modal live acceptance has never been performed.**
 
-Verified on commit `05f45df` by CI runs [39724167730](https://github.com/onedotmint/Reroute/actions/runs/39724167730) and [39724172030](https://github.com/onedotmint/Reroute/actions/runs/39724172030): Node 22 and 24 both passed, **198 passed / 0 failed / 0 skipped**, real localhost SSH/rsync **7/7**, offline smoke with `cloudCalls:0`, and a clean-tree package install (`sourceTreeDirty:false`, 9,535 ms, 127,088 KiB). CI now pins `@cortexkit/aft-pi@0.62.0` in an isolated prefix, so the two real-AFT loading orders execute on every push instead of skipping; their internal assertions on `Spawning binary:` and `Binary version:` in the AFT log are what distinguish a real backend from the bash-only fixture. The 9,535 ms install is CI-cache-dependent and supersedes the earlier 56,838 ms local figure; neither is a device-speed promise.
+Verified on commit `65a0253` (the PR head at merge) by CI runs [39732180527](https://github.com/onedotmint/Reroute/actions/runs/39732180527) and [39732187119](https://github.com/onedotmint/Reroute/actions/runs/39732187119): Node 22 and 24 both passed, **198 passed / 0 failed / 0 skipped**, real localhost SSH/rsync **7/7**, offline smoke with `cloudCalls:0`, and a clean-tree package install (`sourceTreeDirty:false`). CI pins `@cortexkit/aft-pi@0.62.0` in an isolated prefix, so the two real-AFT loading orders execute on every push instead of skipping; their internal assertions on `Spawning binary:` and `Binary version:` in the AFT log are what distinguish a real backend from the bash-only fixture. Earlier install-time figures in this document are CI-cache-dependent and none is a device-speed promise.
 
 ### Pi/AFT daily-workflow follow-up
 
