@@ -29,6 +29,14 @@ jobs:
           cache-dependency-path: npm-shrinkwrap.json
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      # Pinned, isolated prefix install so the real-AFT coexistence cases run instead of skipping.
+      # Installed outside the repo: AFT's optionalDependencies supply the native binary, and the
+      # project's locked dependency tree is left untouched.
+      - name: Install pinned AFT for real coexistence cases
+        run: |
+          npm install --prefix "$RUNNER_TEMP/aft" --no-package-lock --no-save --no-audit --no-fund \
+            @cortexkit/aft-pi@0.62.0
+          echo "REROUTE_AFT_EXTENSION=$RUNNER_TEMP/aft/node_modules/@cortexkit/aft-pi/dist/index.js" >> "$GITHUB_ENV"
       - name: Strict types and build
         run: npm run typecheck && npm run build
       - name: Unit, component, provider and actual Pi SDK tests
