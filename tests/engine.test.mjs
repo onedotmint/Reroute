@@ -4,8 +4,9 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, copyFile, symlink } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
-import { defaults } from '../dist/config.js';
+import { defaults, getJob, saveConfig } from '../dist/config.js';
 import { runRemote } from '../dist/engine.js';
+import { createRerouteTool } from '../dist/pi.js';
 import { processExec } from '../dist/util.js';
 // COMPONENT ONLY: this native process/file fixture deliberately is NOT called SSH or cloud live coverage.
 async function fixture(t) {
@@ -49,4 +50,81 @@ test('failed upload never starts execution and retains an uncertain lock rather 
 test('post-transfer corruption is refused before executing any command',async t=>{
   const f=await fixture(t); f.provider.put=async(a,b)=>{await copyFile(a,b); if(b.endsWith('/input/file.txt')) await writeFile(b,'corrupted')};
   await assert.rejects(f.run('echo BAD'),/Input checksum mismatch/);
+});
+
+test('execution receipts cannot overwrite local job ownership and measured cache fields merge with transfer metrics',async t=>{
+ const f=await fixture(t),exec=f.provider.exec;
+ f.provider.exec=async(command,opts)=>{
+  const result=await exec(command,opts);
+  if(result.code===0&&result.stdout.startsWith('{')){
+   try{const receipt=JSON.parse(result.stdout);if(receipt.status==='exited')result.stdout=JSON.stringify({...receipt,project:'/foreign',id:'not-a-job',root:'/foreign',profile:{provider:'daytona',id:'foreign'},cacheWarning:'Cache save failed: volume-write: PermissionError errno=1 (Operation not permitted)',metrics:{...receipt.metrics,cacheSaved:false,inputBytes:-1,cacheKey:'foreign'}});}catch{}
+  }
+  return result;
+ };
+ const result=await f.run('exit 7');
+ assert.equal(result.code,7);assert.equal(result.job.project,f.root);assert.equal(result.job.profile.provider,'ssh');assert.match(result.job.id,/^[0-9a-f-]{36}$/);
+ assert.ok(result.job.metrics.inputBytes>=0);assert.notEqual(result.job.metrics.cacheKey,'foreign');assert.ok(result.job.metrics.executionMs>=0);
+ assert.equal(result.job.metrics.cacheSaved,false);assert.match(result.job.cacheWarning,/volume-write/);
+ const recorded=await getJob(result.job.id);assert.equal(recorded.metrics.cacheSaved,false);assert.equal(recorded.cacheWarning,result.job.cacheWarning);
+});
+test('invalid terminal execution receipt is unknown, never a claimed success',async t=>{
+ const f=await fixture(t),exec=f.provider.exec;
+ f.provider.exec=async(command,opts)=>{
+  const result=await exec(command,opts);
+  if(result.code===0&&result.stdout.startsWith('{')){
+   try{const receipt=JSON.parse(result.stdout);if(receipt.status==='exited')result.stdout=JSON.stringify({status:'exited',code:'0'});}catch{}
+  }
+  return result;
+ };
+ const result=await f.run('true');assert.equal(result.code,125);assert.equal(result.job.status,'unknown');assert.match(result.job.error,/state query failed/);
+});
+
+test('Pi executes nested/custom project scripts and hooks on isolated provider work, preserving failures without local fallback',async t=>{
+ const previous=process.env.REROUTE_STATE_DIR;const f=await fixture(t);
+ t.after(()=>{if(previous===undefined)delete process.env.REROUTE_STATE_DIR;else process.env.REROUTE_STATE_DIR=previous;});
+ await saveConfig(f.root,f.config);
+ await writeFile(join(f.root,'package.json'),JSON.stringify({private:true,scripts:{
+  pretest:'node hook.cjs pre',test:'npm run custom-suite && npm run custom-suite',posttest:'node hook.cjs post',
+  'custom-suite':'node suite.cjs',build:'node hook.cjs'
+ }}));
+ await writeFile(join(f.root,'hook.cjs'),"require('node:fs').writeFileSync('HOOK_MARKER'+(process.argv[2]||''),process.env.REROUTE_JOB_ID||'LOCAL');\n");
+ await writeFile(join(f.root,'suite.cjs'),"const fs=require('node:fs');fs.writeFileSync('EXECUTION_MARKER',process.env.REROUTE_JOB_ID||'LOCAL');console.log('suite-out');console.error('suite-err');process.exit(Number(fs.readFileSync('exit-code','utf8')));\n");
+ let executions=0;
+ const tool=createRerouteTool((command,options)=>{executions++;return runRemote(command,{...options,provider:f.provider});});
+ for(const [command,code] of [['npm test',0],['npm run custom-suite',7],['npm test',9],['npm run build',0]]){
+  await writeFile(join(f.root,'exit-code'),String(code));
+  const result=await tool.execute('project-script',{command,timeout:10},undefined,undefined,{cwd:f.root});
+  assert.equal(result.details.status,'exited',result.details.reason);assert.equal(result.details.exitCode,code,result.details.reason);
+  assert.equal(result.isError,code!==0);const job=await getJob(result.details.jobId);
+  assert.equal(job.code,code);assert.equal(job.profile.provider,'ssh');
+  const marker=command==='npm run build'?'HOOK_MARKER':'EXECUTION_MARKER';
+  assert.equal(await readFile(join(job.root,'jobs',job.id,'work',marker),'utf8'),job.id);
+  if(command!=='npm run build'){assert.match(result.details.stdout,/suite-out/);assert.match(result.details.stderr,/suite-err/);}
+  const remoteWork=join(job.root,'jobs',job.id,'work');
+  if(command==='npm test'){
+   assert.equal(await readFile(join(remoteWork,'HOOK_MARKERpre'),'utf8'),job.id);
+   if(code===0)assert.equal(await readFile(join(remoteWork,'HOOK_MARKERpost'),'utf8'),job.id);
+   else await assert.rejects(readFile(join(remoteWork,'HOOK_MARKERpost')),{code:'ENOENT'});
+  }
+  for(const name of ['EXECUTION_MARKER','HOOK_MARKER','HOOK_MARKERpre','HOOK_MARKERpost'])await assert.rejects(readFile(join(f.root,name)),{code:'ENOENT'});
+ }
+ assert.equal(executions,4,'one execution per explicit call, including nonzero exits');
+});
+
+test('configured SSH identities with nonstandard filenames are not uploaded',async t=>{
+ const f=await fixture(t);
+ const key=join(f.root,'deployment-identity');await writeFile(key,'FAKE_SSH_PRIVATE_KEY');
+ f.config.profiles.other={provider:'ssh',id:'unused',identityFile:key};
+ const result=await f.run('test ! -e deployment-identity; cat file.txt');
+ assert.equal(result.code,0);assert.equal(result.stdout,'local\n');
+ assert.equal(await readFile(key,'utf8'),'FAKE_SSH_PRIVATE_KEY');
+});
+
+test('home-relative SSH identities remain excluded when configured through the Pi settings path',async t=>{
+ const f=await fixture(t),oldHome=process.env.HOME;process.env.HOME=f.root;
+ t.after(()=>{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;});
+ const key=join(f.root,'deployment-identity');await writeFile(key,'FAKE_HOME_IDENTITY');
+ f.config.profiles.fixture.identityFile='~/deployment-identity';
+ const result=await f.run('test ! -e deployment-identity; cat file.txt');
+ assert.equal(result.code,0);assert.equal(result.stdout,'local\n');assert.equal(await readFile(key,'utf8'),'FAKE_HOME_IDENTITY');
 });

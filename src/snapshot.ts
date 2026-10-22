@@ -1,16 +1,20 @@
 import { constants } from 'node:fs';
 import { open, lstat, readdir, readFile, mkdir, mkdtemp, rm, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import ignore from 'ignore';
-import { hash, processExec, safeRelative, noSymlink } from './util.js';
+import { hash, processExec, safeRelative, noSymlink, inside } from './util.js';
+import { secretFile } from './auth.js';
 import type { Entry, Snapshot } from './types.js';
-const excluded = new Set(['.git','.hg','.svn','node_modules','target','dist','build','.next','.nuxt','.venv','venv','__pycache__','.cache','.pytest_cache','.mypy_cache','.ruff_cache','.tox','.turbo','.gradle','.idea','.ssh','.aws','.azure','.config','.reroute','.reroute.json','.DS_Store']);
-const sensitive = /^(?:\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|id_(?:rsa|ed25519|ecdsa)(?:\.pub)?|credentials(?:\..*)?|secrets?(?:\..*)?)$|\.(?:pem|key|p12|pfx|keystore)$/i;
+const excluded = new Set(['.git','.hg','.svn','node_modules','target','dist','build','.next','.nuxt','.venv','venv','__pycache__','.cache','.pytest_cache','.mypy_cache','.ruff_cache','.tox','.turbo','.gradle','.idea','.ssh','.aws','.azure','.config','.docker','.kube','.gnupg','.reroute','.reroute.json','.DS_Store']);
+const sensitive = /^(?:\.modal\.toml|\.git-credentials|\.dockercfg|\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|id_(?:rsa|ed25519|ecdsa)(?:\.pub)?|credentials(?:\..*)?|secrets?(?:\..*)?)$|\.(?:pem|key|p12|pfx|keystore)$/i;
 export const excludedPath = (p: string) => p.split('/').some(x => excluded.has(x) || sensitive.test(x));
-async function list(root: string): Promise<string[]> {
+async function list(root: string, privatePaths: string[]): Promise<string[]> {
   const custom = ignore();
+  const credentialsRoot = await realpath(dirname(secretFile())).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return resolve(dirname(secretFile())); throw error; });
+  const privatePath = (path: string) => inside(credentialsRoot, resolve(root, path)) || privatePaths.some(privateRoot => inside(privateRoot, resolve(root, path)));
+  if (inside(credentialsRoot, root)) throw new Error('Project overlaps the private credential store; source snapshot refused');
   try { custom.add(await readFile(join(root, '.rerouteignore'), 'utf8')); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
   const git = await processExec('git', ['-C', root, 'rev-parse', '--show-toplevel']).catch(() => undefined);
   let paths: string[];
@@ -26,7 +30,7 @@ async function list(root: string): Promise<string[]> {
       for (const ent of await readdir(join(root, prefix), { withFileTypes: true })) {
         const path = prefix ? `${prefix}/${ent.name}` : ent.name;
         safeRelative(path);
-        if (excludedPath(path) || custom.ignores(path) || (ent.isDirectory() && custom.ignores(path + '/'))) continue;
+        if (privatePath(path) || excludedPath(path) || custom.ignores(path) || (ent.isDirectory() && custom.ignores(path + '/'))) continue;
         if (ent.isDirectory()) await walk(path); else paths.push(path);
       }
     };
@@ -34,7 +38,7 @@ async function list(root: string): Promise<string[]> {
   }
   const result: string[] = [];
   for (const p of [...new Set(paths)].sort()) {
-    safeRelative(p); if (excludedPath(p) || custom.ignores(p)) continue;
+    safeRelative(p); if (privatePath(p) || excludedPath(p) || custom.ignores(p)) continue;
     try {
       const s = await lstat(join(root, p));
       if (!s.isFile()) throw new Error(`Only regular source files are supported (no symlinks or submodules): ${p}`);
@@ -64,11 +68,12 @@ async function fingerprint(root: string, path: string, destination?: string): Pr
   } finally { await source.close(); await output?.close(); }
 }
 /** Two full reads detect edits, additions and deletions. This is a verified copy, not a filesystem-level atomic snapshot. */
-export async function snapshot(rootInput: string, options: { afterCopy?: () => Promise<void>; signal?: AbortSignal } = {}): Promise<Snapshot> {
+export async function snapshot(rootInput: string, options: { afterCopy?: () => Promise<void>; signal?: AbortSignal; privatePaths?: string[] } = {}): Promise<Snapshot> {
   const start = performance.now(), root = await realpath(rootInput), dir = await mkdtemp(join(tmpdir(), 'reroute-input-'));
   const cleanup = () => rm(dir, { recursive: true, force: true });
   try {
-    const paths = await list(root), files: Entry[] = [];
+    const privatePaths = await Promise.all((options.privatePaths ?? []).map(path => realpath(path).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return resolve(path); throw error; })));
+    const paths = await list(root, privatePaths), files: Entry[] = [];
     let bytes = 0;
     for (const path of paths) {
       options.signal?.throwIfAborted();
@@ -77,7 +82,7 @@ export async function snapshot(rootInput: string, options: { afterCopy?: () => P
       files.push(entry);
     }
     await options.afterCopy?.();
-    if (JSON.stringify(paths) !== JSON.stringify(await list(root))) throw new Error('Source file set changed while preparing input; no task started');
+    if (JSON.stringify(paths) !== JSON.stringify(await list(root, privatePaths))) throw new Error('Source file set changed while preparing input; no task started');
     for (const entry of files) {
       options.signal?.throwIfAborted();
       if (JSON.stringify(entry) !== JSON.stringify(await fingerprint(root, entry.path))) throw new Error(`Source changed while preparing input: ${entry.path}; no task started`);

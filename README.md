@@ -1,10 +1,10 @@
 # Reroute
 
-**Keep editing locally in WSL2 and using Pi normally. Send eligible builds and tests to existing remote compute.**
+**Keep editing locally in WSL2 and using Pi normally. Send eligible builds and tests to remote compute.**
 
 Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands are not automatically offloaded (use ordinary Bash in Pi). Failed remote jobs never silently retry locally.
 
-**Status:** 0.3.0-native.4 candidate. SSH is tested through real OpenSSH and rsync on an isolated Ubuntu localhost server in CI. Other cloud providers are implemented and contract-tested, but their real account integrations are **LIVE UNVERIFIED**.
+**Status:** 0.3.0-native.4 development candidate. Opt-in managed Daytona and Modal now have offline resource/cost/recovery contracts; both remain **LIVE UNVERIFIED**. The published `rebuild/0.3-native` baseline does not yet contain this uncommitted product work. SSH has historical real localhost OpenSSH evidence; this round does not claim a new paid-cloud qualification.
 
 ## Install as a native Pi PROJECT package (recommended)
 
@@ -16,7 +16,7 @@ pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native
 pi
 ~~~
 
-Approve **Pi project trust** after reviewing this package. Inside Pi, run `/reroute`, choose **Configure this project**, then choose SSH / Daytona / SkyPilot / Modal / E2B and an existing target. Reroute saves `.reroute.json` in this project. Other projects do not load the extension.
+Approve **Pi project trust** after reviewing this package. Inside Pi, run `/reroute` → **Configure Daytona / Modal / SSH (masked terminal)** for the exact terminal command. In that terminal wizard, use **Space to select one or both cloud providers**, then Enter; enter credentials privately, review defaults and choose the project default. No Sandbox ID is needed for managed compute. The manual Pi profile editor and `setup --advanced` still support existing targets. Reroute saves `.reroute.json` in this project. Other projects do not load the extension.
 
 Pi now owns the installation record at **`.pi/settings.json`**, source checkout, loading, updating and removal. There is no custom entry under `~/.pi/agent/extensions/` and no global Node or Pi installation required. A Pi project package is not loaded before the user trusts the folder.
 
@@ -53,7 +53,9 @@ Earlier Reroute candidates installed `~/.pi/agent/extensions/reroute.ts` globall
 
 ## Friendly setup and Pi control panel
 
-The optional CLI command `reroute setup` guides you through five choices (SSH, Daytona, SkyPilot, Modal, E2B), detects native/environment credentials, and optionally prompts for masked cloud API keys. It then offers a **read-only** list of existing hosts, clusters or Sandboxes; choose an existing item or type its ID yourself. The final optional connection check is explicit and never provisions/resumes compute.
+`reroute setup` now starts a **multi-select**: Daytona, Modal and/or SSH (Space toggles, arrows move, Enter confirms). Configure Daytona and Modal in one pass, then choose the default provider. New cloud profiles get separate named credentials and sensible reviewable defaults; only **Customize** expands specifications, image, budgets and rates. SSH only asks for your existing host/alias. API-key entry is **masked**; Modal takes a Token ID and Secret. Existing profiles stay untouched unless you use advanced editing; you can add another account without overwriting them.
+
+`reroute setup --advanced` keeps the previous detailed flow for account edits, existing Sandbox IDs, E2B/SkyPilot and custom targets; explicit/non-interactive setup flags remain compatible. Quick setup makes **no cloud requests** and saves only after a final confirmation. Spending authorization is a separate **default-No** confirmation for newly configured, credential-ready cloud profiles; choosing providers does not authorize charges. Canceling before final save writes neither project settings nor newly entered credentials.
 
 Cloud credentials are read from each provider's native environment/configuration first. For users who explicitly choose **Save locally**, Reroute stores keys outside the project in `~/.config/reroute/credentials.json` (or `$XDG_CONFIG_HOME/reroute/credentials.json`), with a private 0700 folder and 0600 file. This is **not an encrypted keychain**; use environment variables/native CLI authentication instead if preferable. API keys never appear in `.reroute.json`, the wizard's review, or Pi panel labels. Reroute passes saved credentials directly to official SDKs without adding them to global environment variables.
 
@@ -68,17 +70,17 @@ In Pi, `/reroute` shows the **active profile, provider, resource ID, routing mod
 
 ## Provider prerequisites
 
-All targets must already exist and provide Linux, Python 3, Bash, a /proc filesystem and your project toolchain. No provider is provisioned during setup.
+All execution targets need Linux, Python 3, Bash, a /proc filesystem and your project toolchain. SSH/SkyPilot/E2B and attached cloud targets must already exist. Managed Daytona/Modal can create compute from a reviewed image; `reroute:node-rust-v1` is the starter SDK-built image (Rust stable, Node 22/npm, Python 3). Its actual cloud image build still needs live acceptance.
 
 | Provider | Preexisting setup | Behavior |
 |---|---|---|
 | SSH | OpenSSH host/alias, key auth, trusted host key, rsync locally and remotely | Native ssh/rsync; host stop/resume/destroy unsupported |
 | SkyPilot | Configured `sky` CLI, existing UP cluster, usable matching SSH alias and rsync | Sky status/start/stop/down plus native SSH execution, no automatic cluster launch |
-| Daytona | SDK credentials and started Sandbox ID | Official TS SDK sessions/files/lifecycle; no stdin |
-| Modal | SDK credentials, existing Sandbox ID, existing app name for snapshot stop/resume | JS SDK Sandbox API; resume may create a different billable Sandbox |
+| Daytona | API key; opt-in managed policy **or** existing Sandbox ID | Official SDK discovery/create, custom vCPU/GiB, Volume and guarded auto-stop; no stdin |
+| Modal | Token pair/native auth; opt-in managed policy **or** existing Sandbox ID | Official JS SDK App/Sandbox/Volume, physical CPU/GiB hard limits; managed compute released after confirmed tasks |
 | E2B | SDK credentials and existing running Sandbox ID | Official SDK command/file APIs; resume/pause/kill only via explicit controls |
 
-**Support policy:** SSH has real localhost OpenSSH integration evidence. Daytona, SkyPilot, Modal and E2B are **experimental / LIVE UNVERIFIED**, not production-qualified; they retain their current adapters without further feature expansion until existing-resource live tests pass. Cloud SDK/CLI contracts may change. Explicit resume can incur charges.
+**Support policy:** Daytona/Modal managed operations are implemented and offline-tested, **not production-qualified or live-billing-verified**. SSH/SkyPilot/E2B existing-resource compatibility is retained; no additional providers were added. SDK/CLI contracts and service quotas may change. Creation/start can incur charges; no free credit is assumed. See [managed profiles](#managed-cloud-profiles) and the [live checklist](docs/MANAGED-CLOUD.md#authorized-live-acceptance).
 
 ## Everyday commands
 
@@ -99,15 +101,19 @@ reroute cancel JOB_ID
 
 **AFT or Pi handles ordinary Bash execution. The Pi Package includes independent `reroute_run` and `reroute_status` tools; the standalone CLI is optional.** Both tools are active by default after trusted package loading. Reroute does not register/override `bash`, handle `user_bash`, rewrite other tools' calls, or hook process spawning. AFT requires no changes or special load order.
 
-The execution tool accepts `{ command: "cargo test", timeout: 120 }` (timeout optional, in seconds, up to 86400; otherwise the project's timeout). Submit **one independent, eligible compute command per call**, without `&&`, pipes, redirects or complex shell combinations. For dependent tasks, call the tool separately, wait for the preceding task to succeed, and stop dependent tasks if it fails or remains unknown. It uses Pi's current project working directory and the same `.reroute.json`, conservative router, snapshots and execution engine as the CLI. `/reroute` still configures and manages providers interactively; ordinary shell, Git and file operations, authentication, deployment and interactive commands remain with Pi/AFT `bash`.
+The execution tool accepts `{ command: "cargo test", timeout: 120, cpu: 4, memoryGiB: 8 }` (timeout/specification optional). CPU/memory override only this task on managed compute, respect project limits, and do not silently resize attached targets. Modal CPU is **physical cores**, Daytona CPU is vCPU. Submit **one independent, eligible compute command per call**, without `&&`, pipes, redirects or complex shell combinations. For dependent tasks, call the tool separately, wait for the preceding task to succeed, and stop dependent tasks if it fails or remains unknown. It uses Pi's current project working directory and the same `.reroute.json`, snapshots and execution engine as the CLI. Explicit package-manager scripts such as `npm test`, `npm run build` and custom `npm run <task>` are treated as the project's remote compute boundary; Reroute does not recursively inspect or prove every lifecycle script. Direct project file invocations (`node scripts/verify.mjs`, `python3 scripts/validate.py`, `./scripts/compute`) and custom Make/Ninja targets are also accepted. Unrecognized named scripts/targets use the existing `build` category, so disabling that category still refuses them. Shell syntax, working-directory changes, watch/serve modes, authentication, deployment and interactive commands remain restricted.
 
-A local routing decision (including `mode=local`), an unconfigured project or an ineligible command produces `not_started` with the reason: **nothing is run locally or remotely by the tool**. The model may use existing Bash when local execution is intended. This differs from standalone `reroute run`, which retains its explicit CLI local-routing behavior. There is no implicit local fallback and no automatic cloud creation/start/resume.
+A local routing decision (including `mode=local`), an unconfigured project or an ineligible command produces `not_started` with the reason: **nothing is run locally or remotely by the tool**. The tool does not fall back to local Bash after a refusal or remote failure; the coding agent may choose AFT Bash separately when the task itself is a quick/local operation. Standalone `reroute run` retains its existing CLI local-routing behavior; this is not a change to or interception of AFT. Attached resources never auto-start; only an explicitly authorized managed profile can discover/create/start compute after deterministic specification and budget checks.
 
 Results include status, exit code, Job ID (if allocated), separate stdout/stderr and errors, in text and structured data. Progress is bounded and throttled. Only the final 8192 characters of each output stream are retained (long diagnostics are bounded too); truncation is explicitly reported, and the tool does not save full logs. Arrange explicit output artifacts when a complete record is needed. A confirmed timeout returns 124, a confirmed cancellation returns 130, and infrastructure/unknown/incomplete output returns 125. A failed or uncertain remote task is **never** retried locally: inspect its Job ID with `reroute_status({ jobId: "..." })` (no CLI required) and obtain user authorization before a local rerun.
 
-**Model tool selection is not deterministic command interception.** Registration makes the tool available; it does not guarantee that the model discovers or chooses it for every eligible task. Automated loading tests do not prove real-model selection accuracy.
+**Tool choice stays with the current coding agent.** Prefer Reroute for full builds/test suites and slow CPU/memory-heavy checks; keep quick checks, Git, file operations and ordinary shell with Pi/AFT. Ambiguous work is judged from project context, not by an extra classifier/model request. Existing deterministic eligibility, authorization and budget gates still apply after the choice. No Bash interception or automatic local retry.
 
-Automatic classification fails closed: unrecognized scripts, redirects, pipes, expansions, working-directory changes, watch servers, deployment/publishing and other side-effect commands are not automatically offloaded. To override explicitly use `reroute exec`. Use `reroute --help` for setup flags, diagnostics and resource management.
+Pi can reference **up to three short project-history observations** from existing receipts: at least two confirmed exited runs in the past 30 days, matching the current provider/account/image/specification (and resource ID for attached targets). Each category uses at most five recent samples and reports remote execution-time range, nonzero exits and measured download-archive restores. No raw command/output/error is injected, no local speedup is inferred, and suggestions never authorize a retry. Missing, corrupt, stale or incompatible history stays silent. These tool-guideline observations replace the previous turn’s observations rather than accumulating chat messages; no extra model/API call or database is introduced.
+
+**Model tool selection is not deterministic command interception.** Loading tests establish compatibility, not selection accuracy. The opt-in real-model probe is `REROUTE_MODEL_ACCEPTANCE=1 node tests/pi-model-selection.mjs` from this checkout; it uses actual installed Pi/AFT and an isolated local process fixture, **not cloud compute**. The latest probe passed light-command selection, but the next model request failed, leaving heavy-task selection/failure-follow-up unverified. Redacted evidence: `.artifacts/pi-workflow-selection.json`. No claim of general selection stability.
+
+Automatic routing fails closed for unrecognized top-level commands, redirects, pipes, expansions, working-directory changes, watch servers, authentication, deployment/publishing and other obvious side-effect commands. A package script is different: once the agent explicitly chooses `reroute_run`, its named script is trusted as the remote compute boundary and is not recursively audited. **Project scripts and pre/post hooks can run arbitrary code, including network, filesystem, deployment or other side effects under the remote account.** Command-name restrictions are not a sandbox or an audit: review/trust project code and do not place unnecessary secrets in the remote environment. The tool neither recommends local retry after refusal nor prevents the agent from separately calling AFT. To override a top-level routing refusal explicitly use `reroute exec`. Use `reroute --help` for setup flags, diagnostics and resource management.
 
 ### Job status without the CLI
 
@@ -124,9 +130,9 @@ Queries have a 30-second client deadline and may refresh the local receipt, but 
 
 ## Source inputs, caching and artifacts
 
-Reroute takes a two-read verified snapshot before the task: includes tracked/uncommitted/untracked non-ignored source, excludes deleted files and common secret files, .git, dependencies and build caches. It rejects source symlinks and inconsistent snapshots. Use `.rerouteignore` for extra private or bulky paths. Two reads reduce races; this is **not an atomic filesystem snapshot**. Avoid editing the same files while input is prepared.
+Reroute takes a two-read verified snapshot before the task: includes tracked/uncommitted/untracked non-ignored source, excludes deleted files and common secret files, .git, dependencies and build caches. It rejects source symlinks and inconsistent snapshots. Use `.rerouteignore` for extra private or bulky paths. Two reads reduce races; this is **not an atomic filesystem snapshot**. Avoid editing the same files while input is prepared. Known native credential stores and configured SSH identity files are excluded even when tracked, and SSH disables agent/X11/port forwarding. This is **not a general secret-content scanner**: keys embedded in ordinary source, copied/hard-linked to an unrecognized name, or held in other private directories still require removal or `.rerouteignore` exclusions.
 
-SSH/SkyPilot transfer via native rsync; other providers use native SDK file APIs plus a manifest. Each job gets its own execution directory, separate from reusable dependency/toolchain caches. Jobs on a project remote workspace are serialized rather than racing a shared cache. Remote edits **never write back to local source**.
+SSH/SkyPilot transfer via native rsync; other providers use native SDK file APIs plus a manifest. Each job gets its own execution directory, separate from reusable dependency/toolchain caches. Jobs on a project remote workspace are serialized rather than racing a shared cache. Remote edits **never write back to local source**. Project cache directories on an attached shared host/Sandbox are namespaces, not access control between scripts running as the same remote UID; use separate managed Sandboxes/Volumes for mutually isolated projects. Scripts can read credentials already present on their remote target and can directly write their own mounted Volume. Trust project code and the selected image/target; do not treat these paths or cache checksums as a hostile-code sandbox.
 
 To retrieve an output, have the remote command put it under the `$REROUTE_ARTIFACTS` directory, or request a file retained in that job's remote work directory:
 
@@ -140,10 +146,40 @@ Artifact downloads are checksum-verified tar.gz archives, limited to 256 MiB, an
 ## Safety and troubleshooting
 
 - `reroute doctor --json` checks local requirements; `reroute doctor --connect` probes an existing target, without provisioning it.
-- `reroute resource resume --yes --allow-cost` may incur costs; `reroute resource stop --yes` or `destroy --yes` are explicit. Running/unknown jobs prevent destructive lifecycle actions.
+- `reroute resource resume --yes --allow-cost` applies to attached resources and may incur costs; managed resources start on the next authorized task. `reroute resource stop --yes` / `destroy --yes` are explicit and protect active/unknown jobs. `resource recover --yes` discovers an uncertain managed allocation without starting compute; it never clears remote task locks.
 - On an `unknown` task, use `reroute_status({ jobId: "..." })` in Pi (or optional CLI `reroute status JOB_ID`) and native provider logs before deciding to rerun. Network loss is not proof that remote execution stopped.
 - Older 0.2 synchronization state is not deleted or migrated. Recover any pending files through the legacy version before using `reroute setup --ignore-legacy`.
 - Files sent to remote should not contain credentials. Automatic exclusions are defensive, not a secrets scanner. Run on least-privilege isolated compute.
 - Real user WSL2 Pi extension startup, cross-machine network performance and all four cloud backends remain to be tested. See [DELIVERY.md](./DELIVERY.md).
 
 License: Apache-2.0; dependencies have their own licenses.
+
+## Managed cloud profiles
+
+This development work is in `/home/dotmint/Projects/Reroute-0.3-product`, branch `feat/0.3-daily-cloud`, based on `3076ef7` (`origin/rebuild/0.3-native`). To try **this local source**, rather than the unchanged remote baseline:
+
+~~~bash
+cd /home/dotmint/Projects/Reroute-0.3-product
+npm ci
+npm run build
+cd /path/to/your-project
+pi install -l /home/dotmint/Projects/Reroute-0.3-product
+node /home/dotmint/Projects/Reroute-0.3-product/bin/reroute.mjs setup
+pi
+~~~
+
+In setup, press **Space** to select Daytona and/or Modal (Daytona starts selected), then **Enter**. Choose masked credential entry: one API key for Daytona, Token ID + Secret for Modal. Select **Use recommended settings** or **Customize**, choose the default provider, review the rates, and save. Defaults are 1 CPU / 2 GiB, the Node/Rust/Python starter image, $3/month estimated budget **per credential account**, $0.50/task and a 5-minute idle allowance. These are separate account limits, not a combined $3 cap.
+
+Authorization defaults to **No**. Leave it off to save keys/configuration without permitting future creation/start. A credential deferred with “Configure later” cannot be newly authorized by this wizard. Existing profiles and their prior authorizations are preserved. For custom accounts/targets use `setup --advanced`; in Pi, **Manage providers → Configure providers / API keys (masked terminal)** gives the exact installed setup command, including the current project path. Never paste a key into a Pi field.
+
+- Named credentials are in `~/.config/reroute/accounts/NAME.json` (0700 directory, 0600 unencrypted file). A named account **never falls back** to environment/default/native credentials. Unnamed profiles retain legacy environment-first authentication. `reroute credentials --credential NAME` shows sources only; `forget --provider daytona --credential NAME --yes` affects only that saved account/provider.
+- Profiles choose the account explicitly. Marking one as your gift-credit account is a user choice, **not verified credit**. There is no account rotation or automatic registration.
+- Presets: `small` 1 CPU/2 GiB, `medium` 2/4, `large` 4/8. Custom values and project defaults are supported. Single-task `--cpu 4 --memory 8` or Pi `cpu`/`memoryGiB` overrides preserve the saved default. Rust recommendations suggest 4/8; other tasks suggest 2/4. Suggestions show whether they fit configured limits and never override a user specification.
+- Local quota envelopes (`maxCpu`, `maxMemoryGiB`) and cost reservations are checked before allocation. SDK-compatible units/minimums are validated. **Actual account quota/capacity is enforced by the provider's API, not pre-certified by Reroute.** Rejected or uncertain creation is never reported as successful or blindly retried.
+- `reroute plan --cpu 4 --memory 8 -- cargo test` is offline: estimated reservation, specification, recommendation and explicitly unavailable balance. Defaults are a **$3 local monthly estimate budget**, $0.50/task and no assumed free credit. These are USD, not a currency-conversion promise or hard self-pay cap.
+- Reservations include the maximum task window, preparation/idle allowance and a conservative storage allowance **on every task**. They are intentionally not refunded automatically, including after ambiguous failures. `reroute status` shows the local reservation ledger, not an invoice. `job.cost.runtimeSeconds` is observed client allocation/execution elapsed time, **not provider-confirmed billable uptime**. Image builds, retained storage, egress, billing delays, external use and service failures can produce additional charges. Configure available native account spending protections yourself before authorizing paid compute.
+- Daytona uses label-based discovery, stable installation/project ownership and a project Volume. Guarded auto-stop protects a task's deadline, then returns to the configured idle delay after confirmed completion. Modal uses tagged App/Sandbox discovery and a named Volume, CPU **reservation and hard limit**, and a provider lifetime guard. It releases compute immediately after a confirmed task: this SDK cannot extend lifetime or adjust idle delay on an existing Sandbox. Modal's `idleMinutes` contributes to the fallback lifetime estimate, not a promise of a mutable idle timer. Stopping/recreating compute never deletes the Volume.
+- Only dependency-download stores cross Sandbox lifetimes. Cargo `target` remains local scratch; npm dependencies are freshly installed from the lockfile per job. Download archives are isolated by project, provider, image and lock/toolchain inputs; archives are size-limited and checked against traversal, links and corruption. Cache warnings preserve the task exit code. Metrics include provision, execution, restore/save timings and cache hit; **no cloud speedup is claimed without live measurements**.
+- Cloud intents/leases/reservations live under `~/.local/state/reroute-v3/cloud` (or the existing state override), outside Git/project configuration. Preserve this directory. A crash/unknown task blocks replacement and destructive cleanup. `reroute resource recover --yes` releases only a dead local client lease and discovers the same owned allocation; it does not start, retry, delete or clear task locks. Missing/ambiguous resources need provider-console verification and manual support, not repeated creation.
+
+For the precise SDK evidence, retained billing risks, limitations and authorized live test steps, see [Managed cloud operations](docs/MANAGED-CLOUD.md). Daytona and Modal are still **LIVE UNVERIFIED**.

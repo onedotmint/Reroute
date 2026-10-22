@@ -1,3 +1,16 @@
+export interface Compute { cpu: number; memoryGiB: number }
+export interface CloudPolicy {
+  authorized: boolean;
+  maxCpu: number;
+  maxMemoryGiB: number;
+  maxTaskUsd: number;
+  monthlyUsd: number;
+  // User-reviewed rates, not an account balance or a guaranteed bill cap.
+  cpuHourUsd: number;
+  memoryGiBHourUsd: number;
+  storageMonthUsd: number;
+  idleMinutes: number;
+}
 export const PROVIDERS = ['ssh', 'daytona', 'skypilot', 'modal', 'e2b'] as const;
 export type ProviderId = typeof PROVIDERS[number];
 export type Category = 'build' | 'test' | 'check' | 'benchmark';
@@ -10,6 +23,20 @@ export interface Profile {
   app?: string;
   image?: string;
   snapshot?: string;
+  credential?: string;
+  compute?: Compute;
+  managed?: CloudPolicy;
+  owner?: string;
+  cacheVolume?: string;
+  pendingResume?: string;
+}
+export interface ManagedRequest {
+  name: string;
+  owner: string;
+  create: boolean;
+  start: boolean;
+  guardMinutes: number;
+  replaceStopped?: boolean;
 }
 export interface Config {
   version: 3;
@@ -41,6 +68,9 @@ export interface Provider {
   get(remote: string, local: string): Promise<void>;
   sync?(local: string, remote: string): Promise<number>;
   lifecycle(action: 'stop' | 'resume' | 'destroy', checkpoint?: (patch: Partial<Profile>) => Promise<void>): Promise<Partial<Profile> | void>;
+  ensureManaged?(request: ManagedRequest): Promise<Profile>;
+  guard?(minutes: number): Promise<void>;
+  idle?(minutes: number): Promise<void>;
   close?(): Promise<void> | void;
 }
 export interface Entry { path: string; sha256: string; size: number; mode: number }
@@ -57,5 +87,7 @@ export interface Job {
   status: JobStatus;
   code?: number;
   error?: string;
-  metrics?: { inputBytes: number; inputMs: number; transferredBytes: number; transferMs: number; cacheKey: string };
+  cacheWarning?: string;
+  cost?: { estimatedUsd: number; runtimeSeconds: number; source: 'estimate'; balance: 'unavailable' };
+  metrics?: { inputBytes: number; inputMs: number; transferredBytes: number; transferMs: number; cacheKey: string; provisionMs?: number; executionMs?: number; cacheHit?: boolean; cacheSaved?: boolean; cacheRestoreMs?: number; cacheSaveMs?: number };
 }

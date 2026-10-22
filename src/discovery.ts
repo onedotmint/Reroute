@@ -13,8 +13,8 @@ function row(id: unknown, state: unknown, label?: unknown): ExistingResource | u
   const display = typeof label === 'string' && !/[\r\n\x00-\x1f]/.test(label) ? label : id;
   return { id, state: status, label: display };
 }
-export async function discoverExisting(provider: ProviderId, pending: SecretMap = {}): Promise<ExistingResource[]> {
-  const secrets = { ...await credentialsFor(provider), ...pending };
+export async function discoverExisting(provider: ProviderId, pending: SecretMap = {}, credential?: string): Promise<ExistingResource[]> {
+  const secrets = Object.keys(pending).length ? pending : await credentialsFor(provider, credential);
   const result: ExistingResource[] = [];
   const add = (id: unknown, state: unknown, label?: unknown) => {
     const item = row(id, state, label);

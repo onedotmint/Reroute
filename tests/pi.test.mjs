@@ -16,7 +16,7 @@ test('actual Pi extension loader registers independent run/status tools and /rer
  assert.equal(ext.handlers.has('user_bash'),false);assert.equal(ext.handlers.has('tool_call'),false);
  const tool=ext.tools.get('reroute_run').definition;
  assert.equal(tool.exposure,'direct');assert.equal(tool.defaultActive,true);
- assert.deepEqual(Object.keys(tool.parameters.properties),['command','timeout']);
+ assert.deepEqual(Object.keys(tool.parameters.properties),['command','timeout','cpu','memoryGiB']);
  assert.deepEqual(tool.parameters.required,['command']);
  assert.match(tool.description,/configured Reroute execution environment/);
  assert.match(tool.description,/one independent/);assert.match(tool.description,/&&, pipes, redirects/);
@@ -197,10 +197,10 @@ async function toolProject(t) {
 test('local decisions and missing configuration decline without running remote or local commands',async t=>{
  const {root,config}=await toolProject(t);let calls=0;
  const tool=createRerouteTool(async()=>{calls++;throw Error('Must not execute');});
- for(const [command,reason] of [['git status','control-or-side-effect-command'],['npm publish','control-or-side-effect-command'],['echo hello','unknown-task'],['cargo test | tee log','complex-or-ambiguous-shell']]) {
-   const r=await tool.execute('decline',{command},undefined,undefined,{cwd:root});
-   assert.equal(r.isError,true);assert.equal(r.details.status,'not_started');assert.equal(r.details.exitCode,null);assert.equal(r.details.jobId,null);assert.match(r.details.reason,new RegExp(reason));assert.match(r.content[0].text,/Nothing executed.*Use bash/);
- }
+  for(const [command,reason] of [['git status','control-or-side-effect-command'],['npm publish','control-or-side-effect-command'],['echo hello','unknown-task'],['cargo test | tee log','complex-or-ambiguous-shell']]) {
+    const r=await tool.execute('decline',{command},undefined,undefined,{cwd:root});
+    assert.equal(r.isError,true);assert.equal(r.details.status,'not_started');assert.equal(r.details.exitCode,null);assert.equal(r.details.jobId,null);assert.match(r.details.reason,new RegExp(reason));assert.match(r.content[0].text,/Nothing executed.*does not fall back locally/);
+  }
  await saveConfig(root,{...config,mode:'local'});
  assert.match((await tool.execute('local',{command:'cargo test'},undefined,undefined,{cwd:root})).details.reason,/local-mode/);
  await rm(join(root,'.reroute.json'));

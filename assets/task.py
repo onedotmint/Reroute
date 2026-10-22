@@ -1,8 +1,11 @@
-"""One-shot Linux input verifier / process-group supervisor. No daemon or sync protocol.
+"""One-shot Linux input verifier / descendant supervisor. No daemon or sync protocol.
 Files travel through rsync or the provider's filesystem API. Never copy source back.
 """
 import base64
+import ctypes
 import hashlib
+import gzip
+import io
 import json
 import os
 import pathlib
@@ -14,6 +17,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import uuid
 
@@ -80,7 +84,7 @@ def proc(pid):
     try:
         s = pathlib.Path('/proc', str(pid), 'stat').read_text()
         fields = s[s.rfind(')') + 2:].split()
-        return {'state': fields[0], 'group': int(fields[2]), 'start': fields[19]}
+        return {'state': fields[0], 'parent': int(fields[1]), 'group': int(fields[2]), 'start': fields[19]}
     except (FileNotFoundError, ProcessLookupError):
         return None
 
@@ -94,20 +98,264 @@ def group_alive(group):
     return False
 
 
+def descendants():
+    processes = {int(p.name): proc(int(p.name)) for p in pathlib.Path('/proc').iterdir() if p.name.isdigit()}
+    owned = {os.getpid()}
+    while True:
+        added = {pid for pid, info in processes.items() if info and info['parent'] in owned} - owned
+        if not added:
+            break
+        owned.update(added)
+    return {pid: info for pid, info in processes.items() if pid != os.getpid() and pid in owned and info and info['state'] not in ('Z', 'X')}
+
+
 def terminate_group(group):
     for sig, delay in [(signal.SIGTERM, 1.0), (signal.SIGKILL, 2.0)]:
-        if not group_alive(group):
-            return True
-        try:
-            os.killpg(group, sig)
-        except ProcessLookupError:
-            return True
         until = time.monotonic() + delay
         while time.monotonic() < until:
-            if not group_alive(group):
+            children = descendants()
+            if not group_alive(group) and not children:
                 return True
+            # A reused PGID is not task ownership; signal only verified descendants.
+            for pid, info in children.items():
+                current = proc(pid)
+                if current and current['start'] == info['start']:
+                    try:
+                        os.kill(pid, sig)
+                    except ProcessLookupError:
+                        pass
             time.sleep(.05)
-    return not group_alive(group)
+    return not group_alive(group) and not descendants()
+
+
+# Only download stores cross sandbox lifetimes; build output stays on local scratch.
+DOWNLOAD_DIRS = ('npm/_cacache', 'pnpm', 'bun', 'cargo/registry', 'cargo/git')
+CACHE_EXCLUDED = {'node_modules', 'cargo-target', 'work', 'jobs'}
+CACHE_ARCHIVE_LIMIT = 256 * 1024 * 1024
+CACHE_EXPANDED_LIMIT = 1024 * 1024 * 1024
+CACHE_SECONDS_LIMIT = 120
+
+
+def cache_operation(operation, *args):
+    # Both cache phases must fit the provider's five-minute execution safety margin.
+    def expired(signum, frame):
+        raise TimeoutError('Cache operation exceeded its time limit')
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, CACHE_SECONDS_LIMIT)
+    try:
+        return operation(*args)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def download_path(name):
+    safe(name)
+    if any(part in CACHE_EXCLUDED for part in name.split('/')) or not any(name == p or name.startswith(p + '/') for p in DOWNLOAD_DIRS):
+        raise ValueError('Not a download cache path: ' + name)
+    return name
+
+
+def cache_archive(volume, key):
+    if not isinstance(key, str) or not re.fullmatch('[a-f0-9]{64}', key):
+        raise ValueError('Invalid cache key')
+    return clean_path(pathlib.Path(volume) / (key + '.tgz'))
+
+
+class CacheReader(io.BufferedReader):
+    def __init__(self, source):
+        super().__init__(source)
+        self.size = 0
+        self.tail = b''
+
+    def read(self, size=None):
+        remaining = CACHE_EXPANDED_LIMIT - self.size + 1
+        chunk = super().read(remaining if size is None or size < 0 else min(size, remaining))
+        self.size += len(chunk)
+        self.tail = (self.tail + chunk)[-1024:]
+        if self.size > CACHE_EXPANDED_LIMIT:
+            raise ValueError('Cache exceeds 1 GiB expanded limit')
+        return chunk
+
+
+def cache_generations(volume, key):
+    legacy = cache_archive(volume, key)
+    if not legacy.parent.is_dir():
+        raise ValueError('Cache Volume directory is unavailable')
+    pattern = re.compile(re.escape(key) + r'\.[a-f0-9]{32}\.([a-f0-9]{64})\.tgz')
+    found = []
+    for path in legacy.parent.glob(key + '.*.tgz'):
+        match = pattern.fullmatch(path.name)
+        if match:
+            path = clean_path(path)
+            found.append((path, match[1]))
+    return sorted(found, key=lambda item: item[0].stat().st_mtime_ns, reverse=True)
+
+
+class CacheFailure(RuntimeError):
+    pass
+
+
+def cache_failure(stage, error):
+    # Exceptions may contain private source paths or provider credentials; never serialize them.
+    detail = type(error).__name__
+    if isinstance(error, CacheFailure):
+        return str(error)
+    if isinstance(error, OSError) and error.errno is not None:
+        detail += ' errno=' + str(error.errno) + ' (' + os.strerror(error.errno) + ')'
+    elif isinstance(error, TimeoutError):
+        detail += ' (time limit)'
+    elif str(error) in ('Cache exceeds 1 GiB expanded limit', 'Cache exceeds 256 MiB archive limit'):
+        detail += ': ' + str(error)
+    return stage + ': ' + detail
+
+
+def restore_cache(cache, volume, key):
+    archive = cache_archive(volume, key)
+    generations = cache_generations(volume, key)
+    invalid = False
+    for candidate, digest in generations:
+        if candidate.is_file() and candidate.stat().st_size <= CACHE_ARCHIVE_LIMIT and sha(candidate) == digest:
+            archive = candidate
+            break
+        invalid = True
+    else:
+        if not archive.exists():
+            if invalid:
+                raise ValueError('No complete cache generation')
+            return False
+    if not archive.is_file() or archive.stat().st_size > CACHE_ARCHIVE_LIMIT:
+        raise ValueError('Invalid or oversized cache archive')
+    cache = clean_path(cache)
+    cache.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Stage the entire archive before touching a usable local cache on a corrupt miss.
+    with tempfile.TemporaryDirectory(prefix='.cache-restore-', dir=cache.parent) as temporary:
+        stage = pathlib.Path(temporary)
+        total = end = 0
+        with gzip.open(archive, 'rb') as compressed:
+            stream = CacheReader(compressed)
+            with tarfile.open(fileobj=stream, mode='r|') as tf:
+                for member in tf:
+                    name = safe(member.name)
+                    if name in DOWNLOAD_DIRS and not member.isdir():
+                        raise ValueError('Download cache root must be a directory')
+                    if not (member.isdir() and any(p.startswith(name + '/') for p in DOWNLOAD_DIRS)):
+                        download_path(name)
+                    if member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE) or member.sparse is not None or member.size < 0 or (member.isdir() and member.size):
+                        raise ValueError('Non-regular cache member: ' + name)
+                    total += member.size
+                    end = member.offset_data + ((member.size + 511) // 512) * 512
+                    if total > CACHE_EXPANDED_LIMIT:
+                        raise ValueError('Cache exceeds 1 GiB expanded limit')
+                    destination = clean_path(stage / name)
+                    if member.isdir():
+                        destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    else:
+                        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                        source = tf.extractfile(member)
+                        if source is None:
+                            raise ValueError('Missing cache file payload: ' + name)
+                        with source, open(destination, 'xb') as output:
+                            shutil.copyfileobj(source, output, 262144)
+                        os.chmod(destination, 0o600 | (member.mode & 0o100))
+            # tar's end marker alone does not validate the gzip checksum/trailer.
+            while stream.read(262144):
+                pass
+            if stream.size < end + 1024 or stream.tail != bytes(1024):
+                raise ValueError('Incomplete cache tar trailer')
+        for name in DOWNLOAD_DIRS:
+            source = stage / name
+            destination = clean_path(cache / name)
+            if source.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                if destination.exists():
+                    shutil.rmtree(destination)
+                source.rename(destination)
+    return True
+
+
+def save_cache(cache, volume, key):
+    stage = 'volume-list'
+    published = None
+    verified = False
+    def scan_failed(error):
+        raise error
+    try:
+        generations = cache_generations(volume, key)
+        cache = clean_path(cache)
+        stage = 'scratch-stage'
+        # FUSE Volumes are not POSIX scratch: stage privately, publish only ordinary files.
+        with tempfile.TemporaryDirectory(prefix='.cache-save-', dir=cache.parent) as temporary:
+            output = pathlib.Path(temporary) / 'cache.tgz'
+            total = 0
+            stage = 'scratch-archive'
+            with open(output, 'xb') as raw:
+                os.fchmod(raw.fileno(), 0o600)
+                with tarfile.open(fileobj=raw, mode='w:gz', dereference=False) as tf:
+                    for name in DOWNLOAD_DIRS:
+                        source = clean_path(cache / name)
+                        if not source.exists():
+                            continue
+                        if not source.is_dir():
+                            raise ValueError('Download cache must be a directory: ' + name)
+                        for folder, dirs, files in os.walk(source, followlinks=False, onerror=scan_failed):
+                            dirs[:] = [n for n in dirs if n not in CACHE_EXCLUDED]
+                            for path in [pathlib.Path(folder)] + [pathlib.Path(folder) / n for n in files if n not in CACHE_EXCLUDED]:
+                                path = clean_path(path)
+                                relative = download_path(path.relative_to(cache).as_posix())
+                                info = tf.gettarinfo(str(path), arcname=relative)
+                                if not (info.isdir() or info.isreg()):
+                                    raise ValueError('Non-regular download cache: ' + relative)
+                                total += info.size
+                                if total > CACHE_EXPANDED_LIMIT:
+                                    raise ValueError('Cache exceeds 1 GiB expanded limit')
+                                if info.isreg():
+                                    with open(path, 'rb') as data:
+                                        tf.addfile(info, data)
+                                else:
+                                    tf.addfile(info)
+                                if tf.offset + 10240 > CACHE_EXPANDED_LIMIT:
+                                    raise ValueError('Cache exceeds 1 GiB expanded limit')
+                                if raw.tell() > CACHE_ARCHIVE_LIMIT:
+                                    raise ValueError('Cache exceeds 256 MiB archive limit')
+                if raw.tell() > CACHE_ARCHIVE_LIMIT:
+                    raise ValueError('Cache exceeds 256 MiB archive limit')
+                stage = 'scratch-fsync'
+                raw.flush()
+                os.fsync(raw.fileno())
+            digest = sha(output)
+            destination = cache_archive(volume, key).with_name(key + '.' + uuid.uuid4().hex + '.' + digest + '.tgz')
+            stage = 'volume-open'
+            with os.fdopen(os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as target:
+                published = destination
+                stage = 'volume-write'
+                with open(output, 'rb') as source:
+                    shutil.copyfileobj(source, target, 262144)
+                stage = 'volume-close'
+            stage = 'volume-readback'
+            if destination.stat().st_size != output.stat().st_size or sha(destination) != digest:
+                raise ValueError('Cache readback mismatch')
+            verified = True
+            stage = 'scratch-cleanup'
+        # Only a verified new generation permits retiring old ones; no rename/overwrite on FUSE.
+        try:
+            retained = False
+            for path, old_digest in generations:
+                if not retained and path.is_file() and path.stat().st_size <= CACHE_ARCHIVE_LIMIT and sha(path) == old_digest:
+                    retained = True
+                    continue
+                path.unlink()
+        except Exception as error:
+            return 'Cache cleanup failed: ' + cache_failure('volume-prune', error)
+    except Exception as error:
+        message = cache_failure(stage, error)
+        if published is not None and not verified:
+            try:
+                published.unlink(missing_ok=True)
+            except Exception as cleanup:
+                message += '; ' + cache_failure('volume-discard', cleanup)
+        raise CacheFailure(message) from error
+
 
 
 def main(action, data):
@@ -145,20 +393,38 @@ def main(action, data):
     work = clean_path(root / 'work')
     work_owner = clean_path(root / 'work-owner')
 
+    metrics = {'cacheHit': False, 'cacheSaved': False, 'cacheRestoreMs': 0, 'cacheSaveMs': 0, 'executionMs': 0}
+    cache_warning = []
+    cache = persistent = None
+
     def unlock():
         if lock.is_dir() and (lock / 'owner').read_text() == identity:
             shutil.rmtree(lock)
 
     def finish(status, code):
-        result = {'status': status, 'code': code, 'scope': 'process-group', 'finishedAt': time.time()}
+        result = {'status': status, 'code': code, 'scope': 'supervised-descendants', 'finishedAt': time.time()}
         if status != 'unknown' and work.exists():
             if not work_owner.is_file() or work_owner.read_text() != identity:
                 status, code = 'unknown', 125
                 result.update(status=status, code=code, error='Execution directory ownership is unconfirmed; retained without changes')
             else:
-                # Archive only this task after process-group termination is confirmed.
+                # Archive only this task after descendant termination is confirmed.
                 clean_path(work).rename(job / 'work')
                 work_owner.unlink()
+        if status != 'unknown' and persistent:
+            started = time.monotonic()
+            try:
+                warning = cache_operation(save_cache, cache, persistent, key)
+                metrics['cacheSaved'] = True
+                if warning:
+                    cache_warning.append(warning)
+            except Exception as error:
+                cache_warning.append('Cache save failed: ' + cache_failure('save', error))
+            finally:
+                metrics['cacheSaveMs'] = (time.monotonic() - started) * 1000
+        result['metrics'] = metrics
+        if cache_warning:
+            result['cacheWarning'] = '; '.join(cache_warning)
         write(receipt, result)
         if status != 'unknown':
             unlock()
@@ -272,9 +538,20 @@ def main(action, data):
     key = request['cacheKey']
     if not re.fullmatch('[a-f0-9]{64}', key):
         raise ValueError('Invalid cache key')
+    persistent = request.get('persistentCache')
+    if persistent is not None and persistent != '/var/reroute-cache':
+        raise ValueError('Persistent cache must be /var/reroute-cache')
     cache = clean_path(root / 'cache' / key)
     for directory in ['npm','pnpm','cargo','cargo-target','xdg','pycache','bun']:
         clean_path(cache / directory).mkdir(parents=True, exist_ok=True, mode=0o700)
+    if persistent:
+        started = time.monotonic()
+        try:
+            metrics['cacheHit'] = cache_operation(restore_cache, cache, persistent, key)
+        except Exception as error:
+            cache_warning.append('Cache restore failed (miss): ' + cache_failure('restore', error))
+        finally:
+            metrics['cacheRestoreMs'] = (time.monotonic() - started) * 1000
     cwd = request['cwd']
     workdir = work if cwd == '.' else clean_path(work / safe(cwd))
     env = dict(os.environ)
@@ -294,6 +571,14 @@ def main(action, data):
             argv += ['--store-dir', str(cache / 'pnpm')]
         # Per-task dependency directories avoid stale workspace symlinks; downloads are cached.
         command = '(cd ' + shlex.quote(str(directory)) + ' && ' + shlex.join(argv) + ') && ' + command
+    if (job / 'cancel').exists():
+        persistent = None
+        return finish('cancelled', 130)
+    # Adopt daemonized orphans too; PGID alone misses setsid()/setpgid() descendants.
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+        raise OSError(ctypes.get_errno(), 'Cannot supervise task descendants')
+    execution_started = time.monotonic()
     child = subprocess.Popen(['bash', '-c', command], cwd=workdir, env=env, start_new_session=True)
     write(job / 'process.json', {'supervisor': os.getpid(), 'start': proc(os.getpid())['start'], 'child': child.pid})
     until = time.monotonic() + timeout
@@ -311,14 +596,16 @@ def main(action, data):
             reason = 'timed_out'
             break
         time.sleep(.05)
-    # Reap normal background children as well; a task cannot leave its group running.
+    # Reap background and detached descendants before publishing caches or a terminal receipt.
     confirmed = terminate_group(child.pid)
+    metrics['executionMs'] = (time.monotonic() - execution_started) * 1000
     if not confirmed:
         return finish('unknown', 125)
     try:
         code = child.wait(timeout=2)
     except subprocess.TimeoutExpired:
         return finish('unknown', 125)
+    metrics['executionMs'] = (time.monotonic() - execution_started) * 1000
     if code < 0:
         code = 128 - code
     return finish(reason or 'exited', 130 if reason == 'cancelled' else 124 if reason == 'timed_out' else code)

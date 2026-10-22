@@ -8,7 +8,7 @@ export class E2BProvider implements Provider {
   readonly stdin = true;
   private sandbox?: import('e2b').Sandbox;
   constructor(readonly profile: Profile, private readonly load: () => Promise<Pick<typeof import('e2b'), 'Sandbox' | 'CommandExitError'>> = () => import('e2b')) {}
-  private async auth() { const s = await credentialsFor('e2b'); return s.E2B_API_KEY ? { apiKey: s.E2B_API_KEY } : {}; }
+  private async auth() { const s = await credentialsFor('e2b', this.profile.credential); return s.E2B_API_KEY ? { apiKey: s.E2B_API_KEY } : {}; }
   async status(): Promise<string> { return (await (await this.load()).Sandbox.getInfo(this.profile.id, { ...await this.auth(), requestTimeoutMs: 15000 })).state; }
   private async running(): Promise<import('e2b').Sandbox> {
     if (!this.sandbox) {
