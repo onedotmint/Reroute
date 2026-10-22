@@ -140,7 +140,9 @@ All runs used **2 CPU / 4 GiB** on Daytona and completed in a few minutes total:
 - Sensitive-file exclusion: a fake key at `keys/deploy_key` was configured as `identityFile` **through a symlinked alias path** — the exact case the hardening fixed. It did not appear in the snapshot; `id_rsa` was excluded too.
 - Remote process cleanup: `setsid` detached a `sleep 600` into a new session; a following task measured `survivors: 0`. **Detached descendants are reaped.**
 
-Resource state was confirmed through the official Daytona API, not the local ledger: both owned sandboxes are `stopped`, no unresolved jobs remain. This run created a **new** sandbox and Volume because ownership derives from installation UUID plus project path, so the acceptance project got its own pair. Both Volumes are retained and `ready`: `rr-cache-9cedd84f…` (earlier work) and `rr-cache-5e95c260…` (this run). The local month-to-date reservation rose from 0.32288 to 0.68268 USD — a conservative local estimate, **not** an official billed amount.
+Resource state was confirmed through the official Daytona API, not the local ledger. This run created a **new** sandbox and Volume because ownership derives from installation UUID plus project path, so the acceptance project got its own pair alongside the earlier one.
+
+**Both were then deleted with explicit user authorization, and the official API now reports zero sandboxes and zero volumes.** Deletion is irreversible: the retained cache archives (`rr-cache-9cedd84f…` from the earlier work and `rr-cache-5e95c260…` from this run) are gone, so the next run starts cold and rebuilds the toolchain image. No source code was ever stored there; the caches held download archives only. Local month-to-date reservation reached 0.68268 USD before deletion — a conservative local estimate, **not** an official billed amount.
 
 Not verified in this round: the real-model natural-selection path (`reroute_run` chosen by a model without forcing) was exercised through the engine API directly, not by letting a model choose the tool. That remains covered only by the earlier pre-commit `pi-daytona-workflow` artifact.
 
