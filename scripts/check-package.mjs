@@ -23,7 +23,10 @@ try {
  const installed=join(clean,'node_modules','reroute','bin','reroute.mjs');
  run(process.execPath,[resolve('tests/smoke.mjs'),installed]);
  const pkg=JSON.parse(await readFile(join(clean,'node_modules','reroute','package.json'),'utf8'));
- assert.equal(pkg.version,'0.3.0-native.4');
+ // Compare against the source manifest instead of a literal, so a release bump cannot silently pass.
+ const source=JSON.parse(await readFile('package.json','utf8'));
+ assert.equal(pkg.version,source.version,'Installed tarball version must match the source manifest');
+ assert.match(pkg.version,/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/,'Version must be valid semver');
   const commit=process.env.GITHUB_SHA??run('git',['rev-parse','HEAD']).trim();
   const sourceTreeDirty=run('git',['status','--porcelain','--untracked-files=normal']).trim().length>0;
  await writeFile(join(output,'COMMIT.txt'),commit+'\n');
