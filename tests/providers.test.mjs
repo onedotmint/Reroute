@@ -17,6 +17,7 @@ test('SSH preserves native transport, argv boundaries, strict host keys and incr
  const calls=[];const executor=async(...args)=>{calls.push(args);return {code:0,stdout:'Total bytes sent: 1,024\n',stderr:''}};
  const p=new SshProvider({provider:'ssh',id:'u@host',port:2200,identityFile:'/tmp/key with space'},executor);
  await p.exec("printf '%s' 'untrusted ; text'");assert.equal(calls[0][0],'ssh');assert.ok(calls[0][1].includes('StrictHostKeyChecking=yes'));assert.ok(calls[0][1].includes('/tmp/key with space'));
+ for(const flag of ['ForwardAgent=no','ClearAllForwardings=yes','ForwardX11=no'])assert.ok(calls[0][1].includes(flag));
  assert.equal(await p.sync('/tmp/source with space','/tmp/remote'),1024);assert.equal(calls[1][0],'rsync');assert.ok(calls[1][1].includes('--delete'));assert.ok(calls[1][1].includes('--checksum'));
  await assert.rejects(p.lifecycle('destroy'),/does not own/);
 });
@@ -55,12 +56,13 @@ test('Daytona uses native sessions with distinct channels and does not start sto
 });
 test('Modal snapshot is checkpointed before stopping; reads and destroy never recreate paid compute',async()=>{
  const calls=[];
- const sb={poll:async()=>null,snapshotFilesystem:async()=>{calls.push('snapshot');return {imageId:'im-snapshot'}},terminate:async()=>{calls.push('terminate');return 0},detach:()=>{}};
+ let stopped=false;
+ const sb={poll:async()=>stopped?0:null,snapshotFilesystem:async()=>{calls.push('snapshot');return {imageId:'im-snapshot'}},terminate:async()=>{stopped=true;calls.push('terminate');return 0},detach:()=>{}};
  const api={sandboxes:{fromId:async()=>{calls.push('fromId');return sb},create:async()=>{calls.push('create');return {sandboxId:'sb-new'}}},apps:{fromName:async(_name,options)=>{assert.equal(options.createIfMissing,false);calls.push('app');return {}}},images:{fromId:async()=>({})},close:()=>{}};
  const sdk={ModalClient:class{constructor(){return api}}};const profile={provider:'modal',id:'sb-old',app:'existing'};const p=new ModalProvider(profile,async()=>sdk);
  assert.equal(await p.status(),'running');await p.lifecycle('stop',async patch=>{calls.push('checkpoint');Object.assign(profile,patch)});
  assert.ok(calls.indexOf('checkpoint')<calls.indexOf('terminate'));await p.lifecycle('destroy');assert.equal(calls.includes('create'),false);
- const patch=await p.lifecycle('resume');assert.equal(patch.id,'sb-new');assert.equal(calls.at(-1),'create');
+ const patch=await p.lifecycle('resume',async patch=>{calls.push('checkpoint');Object.assign(profile,patch)});assert.equal(patch.id,'sb-new');assert.equal(calls.at(-1),'checkpoint');assert.equal(profile.pendingResume,undefined);
 });
 test('Modal native process returns stdout/stderr/exit and rejects stopped execution',async()=>{
  const stream=s=>new ReadableStream({start(c){c.enqueue(Buffer.from(s));c.close()}});let stopped=false;
@@ -68,4 +70,20 @@ test('Modal native process returns stdout/stderr/exit and rejects stopped execut
  const sdk={ModalClient:class{sandboxes={fromId:async()=>sb};close(){}}};const p=new ModalProvider({provider:'modal',id:'sb'},async()=>sdk);
  let out='',err='';const r=await p.exec('false',{stdout:b=>out+=b,stderr:b=>err+=b});assert.equal(r.code,5);assert.equal(out,'out');assert.equal(err,'err');
  stopped=true;await assert.rejects(p.exec('false'),/stopped/);
+});
+
+test('Daytona stop is idempotent only after an owned fresh lookup confirms stopped or archived',async()=>{
+ const calls=[];let state='stopped',foreign=false,unavailable=false;
+ const sb={get state(){return state},get labels(){return {'reroute-managed':'v3','reroute-owner':foreign?'foreign':'owner'}},
+  stop:async()=>{calls.push('stop');if(state!=='started')throw Error('SDK rejects stop outside started');state='stopped';},
+  start:async()=>calls.push('start'),delete:async()=>calls.push('delete')};
+ const sdk={Daytona:class{async get(){calls.push('get');if(unavailable)throw Error('lookup unavailable');return sb;}}};
+ const p=new DaytonaProvider({provider:'daytona',id:'sb',owner:'owner'},async()=>sdk);
+ await p.lifecycle('stop');await p.lifecycle('stop');state='archived';await p.lifecycle('stop');
+ assert.deepEqual(calls,['get','get','get']);
+ state='started';await p.lifecycle('stop');await p.lifecycle('stop');assert.equal(calls.filter(c=>c==='stop').length,1);
+ state='error';await assert.rejects(p.lifecycle('stop'),/SDK rejects/);
+ state='stopped';foreign=true;await assert.rejects(p.lifecycle('stop'),/ownership/);foreign=false;
+ unavailable=true;await assert.rejects(p.lifecycle('stop'),/lookup unavailable/);
+ assert.equal(calls.includes('start'),false);assert.equal(calls.includes('delete'),false);
 });

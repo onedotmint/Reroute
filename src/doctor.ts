@@ -1,6 +1,8 @@
 import { loadConfig, activeProfile } from './config.js';
 import { processExec, requireSuccess, shell } from './util.js';
 import { createProvider } from './providers/index.js';
+import { recordedManagedProfile, cloudSummary } from './resources.js';
+import { realpath } from 'node:fs/promises';
 export async function doctor(cwd: string, connect = false) {
   const {root, config} = await loadConfig(cwd);
   const checks: Record<string,unknown> = {node:process.version,platform:process.platform,project:root,configured:!!config,cloudConnections:connect?'requested':'not attempted'};
@@ -14,7 +16,10 @@ export async function doctor(cwd: string, connect = false) {
   if(config) {
     const profile=activeProfile(config); checks.profile=config.active; checks.provider=profile.provider;
     if(connect) {
-      const provider=createProvider(profile);
+      const resolved = profile.managed ? await recordedManagedProfile(await realpath(root), config) : profile;
+      if (!resolved) { checks.resource='not_created_or_unconfirmed';checks.note='No resource lookup/create/start attempted. Run an authorized task, or resource recover for an uncertain allocation.';return {ok:false,checks}; }
+      if(profile.managed)checks.cost=await cloudSummary(profile);
+      const provider=createProvider(resolved);
       try {
         const status=await provider.status(); checks.resource=status;
         if(status==='running') {

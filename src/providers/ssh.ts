@@ -1,7 +1,7 @@
 import type { Profile, Provider, ExecOptions, ExecResult } from '../types.js';
 import { processExec, requireSuccess, shell, quote } from '../util.js';
 export function sshArgs(p: Profile): string[] {
-  return ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=2', ...(p.port ? ['-p', String(p.port)] : []), ...(p.identityFile ? ['-i', p.identityFile] : [])];
+  return ['-T', '-o', 'BatchMode=yes', '-o', 'ForwardAgent=no', '-o', 'ClearAllForwardings=yes', '-o', 'ForwardX11=no', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=2', ...(p.port ? ['-p', String(p.port)] : []), ...(p.identityFile ? ['-i', p.identityFile] : [])];
 }
 /** Existing OpenSSH configuration and agent own authentication and host verification. */
 export class SshProvider implements Provider {

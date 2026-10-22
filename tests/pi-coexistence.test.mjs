@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
@@ -95,6 +96,30 @@ async function coexistence(order, aftPath) {
     assert.ok(session.getActiveToolNames().includes('reroute_run'));
     assert.ok(session.getCallableToolNames().includes('bash'));
     assert.ok(session.getCallableToolNames().includes('reroute_run'));
+    // Synthetic receipts test prompt integration only, not execution or cloud performance.
+    await mkdir(join(process.env.REROUTE_STATE_DIR, 'jobs'));
+    for (const executionMs of [45000, 65000]) {
+      const id = randomUUID();
+      await writeFile(join(process.env.REROUTE_STATE_DIR, 'jobs', id + '.json'), JSON.stringify({
+        id, project: cwd, profile: { provider: 'ssh', id: 'reroute-must-not-contact.invalid' },
+        command: 'cargo test', cwd: '.', createdAt: new Date(Date.now() - 1000).toISOString(), status: 'exited', code: 0,
+        metrics: { executionMs, cacheHit: true },
+      }));
+    }
+    const activeTools = session.getActiveToolNames();
+    const toolGuidelines = Object.fromEntries(activeTools.map(name => [name, [...(session.getToolDefinition(name).promptGuidelines ?? [])]]));
+    // Pi 1.1 takes prompt/images/options; Pi 1.3 takes a typed trigger/options.
+    const beforeAgent = (prompt, options) => session.extensionRunner.emitBeforeAgentStart.length === 2
+      ? session.extensionRunner.emitBeforeAgentStart({ messageType: 'user', prompt }, options)
+      : session.extensionRunner.emitBeforeAgentStart(prompt, undefined, options);
+    const before = await beforeAgent('Check the project', { cwd, selectedTools: activeTools, toolGuidelines });
+    const hints = before.systemPromptOptions.toolGuidelines.reroute_run.filter(line => line.startsWith('Reroute history: '));
+    assert.equal(hints.length, 1); assert.match(hints[0], /45s–65s/);
+    assert.deepEqual(before.messages, []); assert.equal(before.systemPromptOptions.forceSystemPrompt, undefined);
+    assert.deepEqual(before.systemPromptOptions.toolGuidelines.bash, toolGuidelines.bash);
+    const repeated = await beforeAgent('Continue', before.systemPromptOptions);
+    assert.deepEqual(repeated.systemPromptOptions.toolGuidelines.reroute_run, before.systemPromptOptions.toolGuidelines.reroute_run);
+    assert.deepEqual(session.getActiveToolNames(), activeTools);
     // Nested calls require a caller in the canonical transcript; this synthetic message makes no model request.
     session.sessionManager.appendMessage({
       role: 'assistant', content: [], api: session.model.api, provider: session.model.provider, model: session.model.id,
@@ -124,7 +149,7 @@ async function coexistence(order, aftPath) {
     if (aftPath) assert.equal(outcome.result.details.exit_code, 0);
     assert.deepEqual(errors, []);
     assert.equal(modelCalls, 0);
-    const report = { order, actualAft: !!aftPath, active: session.getActiveToolNames(), modelCalls };
+    const report = { order, actualAft: !!aftPath, active: session.getActiveToolNames(), modelCalls, historyHints: hints.length };
     await session.extensionRunner.emit({ type: 'session_shutdown' });
     session.dispose();
     session = undefined;

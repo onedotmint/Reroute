@@ -29,3 +29,47 @@ test('source edits preserve the dependency cache key, lockfile edits change it, 
  await writeFile(join(root,'run.sh'),'echo b');const b=await snapshot(root);t.after(b.cleanup);assert.equal(a.cacheKey,b.cacheKey);assert.notEqual(a.digest,b.digest);
  await writeFile(join(root,'Cargo.lock'),'v2');const c=await snapshot(root);t.after(c.cleanup);assert.notEqual(b.cacheKey,c.cacheKey);
 });
+
+test('named credential stores and Modal native tokens never enter snapshots, even when tracked or placed inside a project',async t=>{
+ const root=await fixture(t),old=process.env.XDG_CONFIG_HOME;process.env.XDG_CONFIG_HOME=join(root,'custom-config');
+ t.after(()=>{if(old===undefined)delete process.env.XDG_CONFIG_HOME;else process.env.XDG_CONFIG_HOME=old;});
+ const accounts=join(root,'custom-config','reroute','accounts');await mkdir(accounts,{recursive:true});
+ await writeFile(join(accounts,'gift-account.json'),'{"DAYTONA_API_KEY":"fixture-secret-never-sent"}');
+ await writeFile(join(root,'.modal.toml'),'token_secret="fixture-secret-never-sent"');
+ await writeFile(join(root,'custom-config','application.ts'),'export const app = 1;');await writeFile(join(root,'source.ts'),'source');
+ for(const tracked of [false,true]){
+  if(tracked){await requireSuccess(processExec('git',['-C',root,'init','-q']));await requireSuccess(processExec('git',['-C',root,'add','.']));}
+  const input=await snapshot(root);t.after(input.cleanup);
+  assert.deepEqual(input.files.map(f=>f.path),['custom-config/application.ts','source.ts']);
+ }
+});
+test('a project inside the private credential store fails closed rather than snapshotting keys',async t=>{
+ const root=await fixture(t),old=process.env.XDG_CONFIG_HOME;process.env.XDG_CONFIG_HOME=join(root,'private');
+ t.after(()=>{if(old===undefined)delete process.env.XDG_CONFIG_HOME;else process.env.XDG_CONFIG_HOME=old;});
+ const project=join(root,'private','reroute','accounts');await mkdir(project,{recursive:true});
+ await writeFile(join(project,'gift.json'),'private');await assert.rejects(snapshot(project),/overlaps the private credential store/);
+});
+
+ test('tracked native credential files stay private without blocking ordinary source',async t=>{
+  const root=await fixture(t);
+  const privateNames=['.git-credentials','.dockercfg','.docker/config.json','.kube/config','.gnupg/private-keys-v1.d/test.key'];
+  await writeFile(join(root,'app.js'),'console.log("source");');
+  for(const name of privateNames){await mkdir(join(root,name,'..'),{recursive:true});await writeFile(join(root,name),'FAKE_SECURITY_AUDIT_TOKEN');}
+  await requireSuccess(processExec('git',['-C',root,'init','-q']));await requireSuccess(processExec('git',['-C',root,'add','.']));
+  const input=await snapshot(root);t.after(input.cleanup);
+  assert.deepEqual(input.files.map(f=>f.path),['app.js']);
+ });
+ test('explicit private paths are excluded even with arbitrary names',async t=>{
+  const root=await fixture(t),key=join(root,'deployment-identity');
+  await writeFile(key,'FAKE_SSH_PRIVATE_KEY');await writeFile(join(root,'app.js'),'source');
+  const input=await snapshot(root,{privatePaths:[key]});t.after(input.cleanup);
+  assert.deepEqual(input.files.map(f=>f.path),['app.js']);
+ });
+
+test('a configured private identity through a filesystem alias excludes its canonical source file',async t=>{
+ const root=await fixture(t),key=join(root,'deployment-identity'),alias=root+'-alias';
+ await writeFile(key,'FAKE_ALIAS_IDENTITY');await writeFile(join(root,'app.js'),'source');
+ await symlink(root,alias,'dir');t.after(()=>rm(alias,{force:true}));
+ const input=await snapshot(root,{privatePaths:[join(alias,'deployment-identity')]});t.after(input.cleanup);
+ assert.deepEqual(input.files.map(f=>f.path),['app.js']);
+});
