@@ -2,7 +2,7 @@
 
 ## Scope and evidence
 
-This is incremental work on `feat/0.3-daily-cloud`, based on `3076ef7` from `rebuild/0.3-native`. The original dirty 0.2 worktree and `main` are untouched. No resident service, Bash interception, source writeback, AI client or new provider was introduced.
+This work is merged into `rebuild/0.3-native` as `2382dc5`. The original 0.2 worktree and `main` are untouched. No resident service, Bash interception, source writeback, AI client or new provider was introduced.
 
 The task pipeline remains: top-level command admission (not a recursive script audit) → one verified source snapshot → authorized resource allocation → existing remote supervisor → validated task receipt. `src/resources.ts` adds only the shared account lease, local estimate ledger and resource ownership/recovery boundary. Provider SDK details stay in each adapter. `reroute_run` / `reroute_status` remain the only registered model tools. Their static guidance is intentionally short: choose based on task context, prefer Reroute for heavy builds/full tests, keep quick checks/Git/files with Pi/AFT, and inspect failures with `reroute_status`. A per-turn hook may add at most three recent confirmed observations (no raw commands/output and no speedup claim); it never calls a model and never changes AFT/Bash ownership.
 
@@ -14,7 +14,9 @@ Locked SDK evidence was checked against installed declarations **and implementat
 - Official [Modal Sandbox files](https://modal.com/docs/guide/sandbox-files) and [Volumes](https://modal.com/docs/guide/volumes) describe background commits and a final commit on Sandbox termination; explicit `sync` commit is **Volume-v2-only**. The implementation relies on the documented final commit and waits for termination, not an invented JS `Volume.commit()`. Actual durable writes still require live acceptance.
 - Public pricing fetched 2026-10-21: [Daytona](https://www.daytona.io/pricing/) vCPU $0.0504/hour and memory $0.0162/GiB-hour; [Modal](https://modal.com/pricing) **Sandbox/non-preemptible** physical CPU $0.00003942/core-second and memory $0.00000667/GiB-second (hourly $0.141912/$0.024012). Modal's cheaper preemptible Function rates must not be substituted. Rates are reviewable defaults, not a guaranteed quote or proof of free-credit eligibility.
 
-No account API, billable create/start, live cloud execution or real cloud image build was authorized/performed during development. **Both providers remain LIVE UNVERIFIED.**
+**Daytona has since been verified live** against a real account: repeated smoke and cache cold/warm runs, a real-model plus real-AFT workflow, and a full acceptance on the exact merged commit (`f713f52`) at 2 vCPU / 4 GiB covering first-run image build, cache save then hit, intentional failure and retest, canonical identity-file exclusion, and detached-descendant cleanup. Evidence lives in `.artifacts/live-clean-commit-acceptance.json` and the earlier artifacts named in [DELIVERY.md](../DELIVERY.md). All created resources were then deleted; the account now holds zero sandboxes and zero volumes.
+
+**Modal has never been run against the real service.** Its support rests entirely on offline SDK-shaped tests and fixtures. **Billing is unverified for both providers**: every artifact records `actualBilledUsd: null`, and the only spending figure available is a rounded cumulative dashboard value explicitly marked as not that run's charge.
 
 ## Configuration and cost boundaries
 

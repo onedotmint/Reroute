@@ -4,7 +4,7 @@
 
 Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands are not automatically offloaded (use ordinary Bash in Pi). Failed remote jobs never silently retry locally.
 
-**Status:** 0.3.0-native.4 development candidate. Opt-in managed Daytona and Modal now have offline resource/cost/recovery contracts; both remain **LIVE UNVERIFIED**. The published `rebuild/0.3-native` baseline does not yet contain this uncommitted product work. SSH has historical real localhost OpenSSH evidence; this round does not claim a new paid-cloud qualification.
+**Status:** 0.3.0-native.4 development candidate, merged into `rebuild/0.3-native` as `2382dc5` and **not yet published to npm**. Managed **Daytona is live-verified**; managed **Modal is implemented and offline-tested but has never been run against the real service**. SSH has historical real localhost OpenSSH evidence. Billing remains unverified for every provider.
 
 ## Install as a native Pi PROJECT package (recommended)
 
@@ -156,15 +156,15 @@ License: Apache-2.0; dependencies have their own licenses.
 
 ## Managed cloud profiles
 
-This development work is in `/home/dotmint/Projects/Reroute-0.3-product`, branch `feat/0.3-daily-cloud`, based on `3076ef7` (`origin/rebuild/0.3-native`). To try **this local source**, rather than the unchanged remote baseline:
+This work is merged into `rebuild/0.3-native`. To run from source instead of the packaged tarball:
 
 ~~~bash
-cd /home/dotmint/Projects/Reroute-0.3-product
+cd /path/to/your/Reroute/checkout
 npm ci
 npm run build
 cd /path/to/your-project
-pi install -l /home/dotmint/Projects/Reroute-0.3-product
-node /home/dotmint/Projects/Reroute-0.3-product/bin/reroute.mjs setup
+pi install -l /path/to/your/Reroute/checkout
+node /path/to/your/Reroute/checkout/bin/reroute.mjs setup
 pi
 ~~~
 
@@ -182,4 +182,4 @@ Authorization defaults to **No**. Leave it off to save keys/configuration withou
 - Only dependency-download stores cross Sandbox lifetimes. Cargo `target` remains local scratch; npm dependencies are freshly installed from the lockfile per job. Download archives are isolated by project, provider, image and lock/toolchain inputs; archives are size-limited and checked against traversal, links and corruption. Cache warnings preserve the task exit code. Metrics include provision, execution, restore/save timings and cache hit; **no cloud speedup is claimed without live measurements**.
 - Cloud intents/leases/reservations live under `~/.local/state/reroute-v3/cloud` (or the existing state override), outside Git/project configuration. Preserve this directory. A crash/unknown task blocks replacement and destructive cleanup. `reroute resource recover --yes` releases only a dead local client lease and discovers the same owned allocation; it does not start, retry, delete or clear task locks. Missing/ambiguous resources need provider-console verification and manual support, not repeated creation.
 
-For the precise SDK evidence, retained billing risks, limitations and authorized live test steps, see [Managed cloud operations](docs/MANAGED-CLOUD.md). Daytona and Modal are still **LIVE UNVERIFIED**.
+For the precise SDK evidence, retained billing risks, limitations and authorized live test steps, see [Managed cloud operations](docs/MANAGED-CLOUD.md). Managed **Daytona is live-verified**; managed **Modal has never been run against the real service**. Billing is unverified for both.
