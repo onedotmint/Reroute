@@ -127,6 +127,23 @@ These were real, authorized, billed Daytona runs against an existing owned sandb
 - **Bounded security probe on the existing sandbox** — `.artifacts/security-daytona-live-result.json`, 2026-10-22T02:37Z: `outcome: passed`, `newResources: 0`, job exited 0, ~29 s compute window, ~0.04 USD estimate.
 - **Final resource state** — `.artifacts/security-daytona-final-state.json`, 2026-10-22T02:38Z: sandbox `stopped`, one retained Volume `ready`, `newCloudResources: 0`. The Volume is deliberately kept and continues to incur storage cost.
 
+#### Live acceptance on the exact PR commit (clean checkout)
+
+Unlike the runs above, this one is on the real code. A clean `git worktree` was created at `f713f52` (the PR head), dependencies installed with `npm ci`, and `tsc` built. `sourceTreeDirty: false`, and the checkout SHA equals the PR head SHA exactly. Evidence: `.artifacts/live-clean-commit-acceptance.json`.
+
+All runs used **2 CPU / 4 GiB** on Daytona and completed in a few minutes total:
+
+- `npm test` first run: exit 0, `cacheHit: false`, `cacheSaved: true`, `provisionMs` 36,775. This is also the first-ever cloud build of the starter toolchain recipe — it succeeded.
+- `npm test` second run: exit 0, `cacheHit: true`, `transferredBytes: 0`, `provisionMs` dropped to 4,486. **Cache save and hit both confirmed on real hardware.**
+- Intentional failure: exit 1 with the genuine remote assertion (`actual: 0, expected: 99`), no local fallback.
+- Fix and retest: exit 0. **Failure → fix → retest confirmed.**
+- Sensitive-file exclusion: a fake key at `keys/deploy_key` was configured as `identityFile` **through a symlinked alias path** — the exact case the hardening fixed. It did not appear in the snapshot; `id_rsa` was excluded too.
+- Remote process cleanup: `setsid` detached a `sleep 600` into a new session; a following task measured `survivors: 0`. **Detached descendants are reaped.**
+
+Resource state was confirmed through the official Daytona API, not the local ledger: both owned sandboxes are `stopped`, no unresolved jobs remain. This run created a **new** sandbox and Volume because ownership derives from installation UUID plus project path, so the acceptance project got its own pair. Both Volumes are retained and `ready`: `rr-cache-9cedd84f…` (earlier work) and `rr-cache-5e95c260…` (this run). The local month-to-date reservation rose from 0.32288 to 0.68268 USD — a conservative local estimate, **not** an official billed amount.
+
+Not verified in this round: the real-model natural-selection path (`reroute_run` chosen by a model without forcing) was exercised through the engine API directly, not by letting a model choose the tool. That remains covered only by the earlier pre-commit `pi-daytona-workflow` artifact.
+
 #### Still not verified
 
 - **Modal live execution: never performed.** There is no Modal artifact; Modal support rests on offline SDK-shaped tests and fixtures only.
