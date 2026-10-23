@@ -14,9 +14,10 @@ test('Reroute starter and registry image paths never invoke local COPY glob expa
  const oldConfig=process.env.XDG_CONFIG_HOME,oldKey=process.env.DAYTONA_API_KEY;
  process.env.XDG_CONFIG_HOME=root;process.env.DAYTONA_API_KEY='FAKE_OFFLINE_KEY';
  const require=createRequire(import.meta.url),sdkRequire=createRequire(require.resolve('@daytona/sdk/package.json'));
- const fg=sdkRequire('fast-glob'),original=fg.sync;let globCalls=0;
- fg.sync=()=>{globCalls++;throw Error('Unexpected local COPY glob expansion');};
- t.after(async()=>{fg.sync=original;if(oldConfig===undefined)delete process.env.XDG_CONFIG_HOME;else process.env.XDG_CONFIG_HOME=oldConfig;if(oldKey===undefined)delete process.env.DAYTONA_API_KEY;else process.env.DAYTONA_API_KEY=oldKey;await rm(root,{recursive:true,force:true});});
+ assert.equal(sdkRequire('@daytona/sdk/package.json').dependencies['fast-glob'],undefined);
+ const globPath=sdkRequire.resolve('tinyglobby'),original=sdkRequire('tinyglobby');let globCalls=0;
+ sdkRequire.cache[globPath].exports={...original,globSync:()=>{globCalls++;throw Error('Unexpected local COPY glob expansion');}};
+ t.after(async()=>{sdkRequire.cache[globPath].exports=original;if(oldConfig===undefined)delete process.env.XDG_CONFIG_HOME;else process.env.XDG_CONFIG_HOME=oldConfig;if(oldKey===undefined)delete process.env.DAYTONA_API_KEY;else process.env.DAYTONA_API_KEY=oldKey;await rm(root,{recursive:true,force:true});});
  for(const image of [TOOLCHAIN_IMAGE,'registry.example.invalid/toolchain:fixture']){
   let sent;
   const sandbox={id:'fake-sandbox',state:'started',cpu:2,memory:4,labels:{'reroute-managed':'v3','reroute-owner':'fake-owner'}};

@@ -6,9 +6,13 @@ Reroute is an on-demand task offloader, not a remote IDE or a synchronization da
 
 **Status:** 0.3.1 preview patch. Check the [npm registry](https://www.npmjs.com/package/@onedotmint/reroute) and [GitHub Releases](https://github.com/onedotmint/Reroute/releases) for publication status; passing CI alone is not a release. Managed **Daytona is live-verified**; managed **Modal has passed default-toolchain and real-repository cold/warm acceptance** with the fixes in this patch (see the managed-cloud evidence below). SSH has historical real localhost OpenSSH evidence. Billing remains unverified for every provider.
 
+See [October security maintenance](docs/SECURITY-2026-10.md) for the dependency changes, official advisories and remaining scope.
+
+Use `nvm use` from this checkout to select the pinned development runtime (Node 24.22.1), or install a newer patched version on a supported line. `package.json` and `reroute doctor` reject older vulnerable/EOL lines. Updating this package does **not** replace the Node process running Pi or an existing cloud image; upgrade/restart that host separately.
+
 ## Install as a native Pi PROJECT package (recommended)
 
-Reroute now relies on **Pi's own package manager**. From your WSL2 project (Pi and Node.js >= 22.19 required):
+Reroute now relies on **Pi's own package manager**. From your WSL2 project (Pi and a security-patched Node.js required: 22.23.4+, 24.22.1+, or 26.12.1+ on the supported release lines):
 
 ~~~bash
 cd /path/to/your-project

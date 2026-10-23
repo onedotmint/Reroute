@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22', '24']
+        node: ['22.23.4', '24.22.1']
     env:
       REROUTE_LIVE: '0'
     steps:
@@ -50,7 +50,7 @@ jobs:
       - name: Real SSH, rsync, Pi, artifacts and compiler-cache acceptance
         run: npm run test:ssh
       - name: Real Pi-native Git project install, trust, /reroute loader and removal
-        if: github.event_name == 'push' && github.repository == 'onedotmint/Reroute' && matrix.node == '22'
+        if: github.event_name == 'push' && github.repository == 'onedotmint/Reroute' && matrix.node == '22.23.4'
         env:
           REROUTE_GIT_COMMIT: ${{ github.sha }}
         run: node scripts/verify-pi-git.mjs

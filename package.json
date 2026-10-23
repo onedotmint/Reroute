@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "repository": { "type": "git", "url": "git+https://github.com/onedotmint/Reroute.git" },
-  "engines": { "node": ">=22.19.0" },
+  "engines": { "node": "^22.23.4 || ^24.22.1 || >=26.12.1" },
   "bin": { "reroute": "bin/reroute.mjs" },
   "exports": { ".": "./dist/engine.js", "./pi": "./adapters/pi.ts" },
   "pi": { "extensions": ["./adapters/pi.ts"] },
@@ -25,10 +25,10 @@
   },
   "dependencies": {
     "@clack/prompts": "1.8.1",
-    "@daytona/sdk": "0.223.1",
+    "@daytona/sdk": "0.226.0",
     "e2b": "2.55.0",
-    "ignore": "7.0.12",
-    "modal": "0.11.0",
+    "ignore": "7.0.13",
+    "modal": "0.11.1",
     "shell-quote": "1.12.0"
   },
   "devDependencies": {

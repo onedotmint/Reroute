@@ -3,13 +3,19 @@ import { processExec, requireSuccess, shell } from './util.js';
 import { createProvider } from './providers/index.js';
 import { recordedManagedProfile, cloudSummary } from './resources.js';
 import { realpath } from 'node:fs/promises';
+export function supportedNode(version: string): boolean {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (!match) return false;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  const minimum = major === 22 ? [23, 4] : major === 24 ? [22, 1] : major === 26 ? [12, 1] : undefined;
+  return major! > 26 || !!minimum && (minor! > minimum[0]! || minor === minimum[0] && patch! >= minimum[1]!);
+}
 export async function doctor(cwd: string, connect = false) {
   const {root, config} = await loadConfig(cwd);
   const checks: Record<string,unknown> = {node:process.version,platform:process.platform,project:root,configured:!!config,cloudConnections:connect?'requested':'not attempted'};
-  const [major,minor]=process.versions.node.split('.').map(Number);
-  let ok = process.platform !== 'win32' && (major! > 22 || (major === 22 && minor! >= 19));
+  let ok = process.platform !== 'win32' && supportedNode(process.versions.node);
   checks.supportedNode=ok;
-  if(!ok)checks.required='Linux or WSL2, Node >=22.19.0';
+  if(!ok)checks.required='Linux or WSL2, Node ^22.23.4 || ^24.22.1 || >=26.12.1';
   const tools = ['git','bash', ...(config && ['ssh','skypilot'].includes(activeProfile(config).provider) ? ['ssh','rsync', ...(activeProfile(config).provider==='skypilot'?['sky']:[])] : [])];
   for (const tool of tools) { const r=await processExec('sh',['-c','command -v '+tool],{timeoutMs:5000}); checks[tool]=r.code===0?'found':'missing'; if(r.code!==0)ok=false; }
   if (!config) checks.next='Run reroute setup in this project. No remote test performed.';
