@@ -27,7 +27,10 @@ try {
  const pkg=JSON.parse(await readFile(join(packageDir,'package.json'),'utf8'));
  assert.equal(pkg.name,source.name,'Installed tarball name must match the source manifest');
  // Compare against the source manifest instead of a literal, so a release bump cannot silently pass.
- assert.equal(pkg.version,source.version,'Installed tarball version must match the source manifest');
+  assert.equal(pkg.version,source.version,'Installed tarball version must match the source manifest');
+  for (const file of ['assets/task.py','src/providers/modal.ts','dist/providers/modal.js']) {
+    assert.equal(await readFile(join(packageDir,file),'utf8'),await readFile(file,'utf8'),'Installed Modal executor must match source/build: '+file);
+  }
  assert.match(pkg.version,/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/,'Version must be valid semver');
   const commit=process.env.GITHUB_SHA??run('git',['rev-parse','HEAD']).trim();
   const sourceTreeDirty=run('git',['status','--porcelain','--untracked-files=normal']).trim().length>0;

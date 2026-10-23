@@ -87,7 +87,8 @@ export class ModalProvider implements Provider {
     options.signal?.throwIfAborted();
     const sb = await this.lookup();
     if (await sb.poll() !== null) throw new Error('Modal sandbox is stopped; use explicit snapshot resume');
-    const proc = await sb.exec(['bash', '-lc', command], { mode: 'binary', timeoutMs: Math.ceil((options.timeoutMs ?? 120000) / 1000) * 1000 });
+    // Login profiles can discard toolchain paths inherited from the image.
+    const proc = await sb.exec(['bash', '-c', command], { mode: 'binary', timeoutMs: Math.ceil((options.timeoutMs ?? 120000) / 1000) * 1000 });
     let stdout = '', stderr = '', stdoutTruncated = false, stderrTruncated = false;
     const drain = async (stream: ReadableStream<Uint8Array>, target: 'stdout' | 'stderr') => {
       const reader = stream.getReader(), decoder = new StringDecoder('utf8');

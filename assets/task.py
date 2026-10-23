@@ -134,6 +134,8 @@ CACHE_EXCLUDED = {'node_modules', 'cargo-target', 'work', 'jobs'}
 CACHE_ARCHIVE_LIMIT = 256 * 1024 * 1024
 CACHE_EXPANDED_LIMIT = 1024 * 1024 * 1024
 CACHE_SECONDS_LIMIT = 120
+CACHE_VOLUME_PATH = pathlib.Path('/var/reroute-cache')
+MODAL_VOLUME_ROOT = pathlib.Path('/__modal/volumes')
 
 
 def cache_operation(operation, *args):
@@ -159,7 +161,15 @@ def download_path(name):
 def cache_archive(volume, key):
     if not isinstance(key, str) or not re.fullmatch('[a-f0-9]{64}', key):
         raise ValueError('Invalid cache key')
-    return clean_path(pathlib.Path(volume) / (key + '.tgz'))
+    volume = pathlib.Path(volume)
+    if volume == CACHE_VOLUME_PATH and volume.is_symlink():
+        # Only Modal's fixed mount alias is trusted; targets and cache files must remain link-free.
+        clean_path(volume.parent)
+        target = pathlib.Path(os.readlink(volume))
+        if target.parent != MODAL_VOLUME_ROOT or not re.fullmatch('vo-[A-Za-z0-9]+', target.name):
+            raise ValueError('Unexpected cache Volume mount')
+        volume = target
+    return clean_path(volume / (key + '.tgz'))
 
 
 class CacheReader(io.BufferedReader):

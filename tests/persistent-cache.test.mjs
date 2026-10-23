@@ -514,3 +514,89 @@ assert task.terminate_group(12345) is False
 assert calls == [], 'signalled a group without any owned descendants'
 `);
 });
+
+
+test('Modal mount aliases preserve download caches across scratch reconstruction', async t => {
+  await python(t, String.raw`
+task.CACHE_VOLUME_PATH = base / 'mounted-cache'
+task.MODAL_VOLUME_ROOT = base / 'modal-volumes'
+backing = task.MODAL_VOLUME_ROOT / 'vo-fixture'
+backing.mkdir(parents=True)
+volume = task.CACHE_VOLUME_PATH
+volume.symlink_to(backing, target_is_directory=True)
+cold = run('mkdir -p "$CARGO_HOME/registry"; printf persisted > "$CARGO_HOME/registry/blob"')
+assert cold['code'] == 0 and cold['metrics']['cacheSaved'] is True, cold
+assert 'cacheWarning' not in cold, cold
+shutil.rmtree(root)
+warm = run('test "$(cat "$CARGO_HOME/registry/blob")" = persisted')
+assert warm['code'] == 0 and warm['metrics']['cacheHit'] is True, warm
+assert warm['metrics']['cacheSaved'] is True and 'cacheWarning' not in warm, warm
+assert len(list(backing.glob(key + '.*.tgz'))) == 2
+# Archive contents remain untrusted even behind a valid provider mount.
+archive([('cargo/registry/link', tarfile.SYMTYPE, b'')])
+try:
+    restore(root / 'cache' / key, volume, key)
+    raise AssertionError('accepted linked archive member through Modal mount')
+except ValueError:
+    pass
+`);
+});
+
+test('Modal mount allowance rejects unexpected targets, linked ancestors and linked cache files', async t => {
+  await python(t, String.raw`
+task.CACHE_VOLUME_PATH = base / 'mounted-cache'
+task.MODAL_VOLUME_ROOT = base / 'modal-volumes'
+backing = task.MODAL_VOLUME_ROOT / 'vo-fixture'
+backing.mkdir(parents=True)
+mounted = task.CACHE_VOLUME_PATH
+mounted.symlink_to(backing, target_is_directory=True)
+assert task.cache_archive(mounted, key) == backing / (key + '.tgz')
+
+def refused(path):
+    try:
+        task.cache_archive(path, key)
+        raise AssertionError('accepted unsafe cache path: ' + str(path))
+    except ValueError:
+        pass
+
+# Only the fixed mount entry may be a link; neither arbitrary aliases nor targets qualify.
+alias = base / 'other-alias'
+alias.symlink_to(backing, target_is_directory=True)
+refused(alias)
+for target in (base, task.MODAL_VOLUME_ROOT, task.MODAL_VOLUME_ROOT / 'not-a-volume', pathlib.Path('modal-volumes/vo-fixture'), backing / '..' / '..' / 'outside'):
+    mounted.unlink()
+    mounted.symlink_to(target, target_is_directory=True)
+    refused(mounted)
+mounted.unlink()
+mounted.symlink_to(backing, target_is_directory=True)
+# A matching Volume ID must still name a real directory, not another link.
+backing.rmdir()
+backing.symlink_to(base, target_is_directory=True)
+refused(mounted)
+backing.unlink()
+backing.mkdir()
+# A link anywhere above the canonical Volume target is still rejected.
+native = base / 'native'
+task.MODAL_VOLUME_ROOT.rename(native)
+task.MODAL_VOLUME_ROOT.symlink_to(native, target_is_directory=True)
+refused(mounted)
+task.MODAL_VOLUME_ROOT.unlink()
+native.rename(task.MODAL_VOLUME_ROOT)
+# Mount ancestors, legacy archives and generation archives keep their no-link checks.
+parent_alias = base / 'parent-alias'
+parent_alias.symlink_to(base, target_is_directory=True)
+task.CACHE_VOLUME_PATH = parent_alias / mounted.name
+refused(task.CACHE_VOLUME_PATH)
+task.CACHE_VOLUME_PATH = mounted
+(backing / (key + '.tgz')).symlink_to(base / 'outside')
+refused(mounted)
+(backing / (key + '.tgz')).unlink()
+generation = backing / (key + '.' + 'b' * 32 + '.' + 'c' * 64 + '.tgz')
+generation.symlink_to(base / 'outside')
+try:
+    task.cache_generations(mounted, key)
+    raise AssertionError('accepted symlink cache generation')
+except ValueError:
+    pass
+`);
+});

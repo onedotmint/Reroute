@@ -4,7 +4,7 @@
 
 Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands are not automatically offloaded (use ordinary Bash in Pi). Failed remote jobs never silently retry locally.
 
-**Status:** 0.3.0 preview. Check the [npm registry](https://www.npmjs.com/package/@onedotmint/reroute) and [GitHub Releases](https://github.com/onedotmint/Reroute/releases) for publication status; passing CI alone is not a release. Managed **Daytona is live-verified**; managed **Modal is implemented and offline-tested but has never been run against the real service**. SSH has historical real localhost OpenSSH evidence. Billing remains unverified for every provider.
+**Status:** 0.3.1 preview patch. Check the [npm registry](https://www.npmjs.com/package/@onedotmint/reroute) and [GitHub Releases](https://github.com/onedotmint/Reroute/releases) for publication status; passing CI alone is not a release. Managed **Daytona is live-verified**; managed **Modal has passed default-toolchain and real-repository cold/warm acceptance** with the fixes in this patch (see the managed-cloud evidence below). SSH has historical real localhost OpenSSH evidence. Billing remains unverified for every provider.
 
 ## Install as a native Pi PROJECT package (recommended)
 
@@ -12,7 +12,7 @@ Reroute now relies on **Pi's own package manager**. From your WSL2 project (Pi a
 
 ~~~bash
 cd /path/to/your-project
-pi install -l npm:@onedotmint/reroute@0.3.0
+pi install -l npm:@onedotmint/reroute@0.3.1
 pi
 ~~~
 
@@ -23,23 +23,23 @@ Pi now owns the installation record at **`.pi/settings.json`**, source checkout,
 ~~~bash
 pi list
 pi update --extensions
-pi remove -l npm:@onedotmint/reroute@0.3.0
+pi remove -l npm:@onedotmint/reroute@0.3.1
 ~~~
 
 For noninteractive inspections, `pi list --approve` explicitly permits reading trusted project settings; `pi list --no-approve` intentionally hides them. Global Pi installation is available by **omitting `-l`**, but project-only is the default recommendation.
 
 For a development Git install, use `pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native`. The Git checkout does not need a built `dist/`: Pi's native TypeScript loader loads `adapters/pi.ts` and the source modules directly. A local checked-out source directory is also a native Pi package: `pi install -l /absolute/path/to/Reroute`.
 
-The npm package is **`@onedotmint/reroute`**, not the unrelated unscoped `reroute`; the CLI command remains **`reroute`**. The pinned npm install requires that version to be available in the registry. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `onedotmint-reroute-0.3.0.tgz` for the **optional standalone CLI**; an uploaded CI artifact does not by itself publish to npm or create a GitHub Release.
+The npm package is **`@onedotmint/reroute`**, not the unrelated unscoped `reroute`; the CLI command remains **`reroute`**. The pinned npm install requires that version to be available in the registry. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `onedotmint-reroute-0.3.1.tgz` for the **optional standalone CLI**; an uploaded CI artifact does not by itself publish to npm or create a GitHub Release.
 
 ### Optional CLI and masked API keys
 
 The `/reroute` Pi screen can create, inspect and edit project profiles without the CLI. For Daytona / Modal / E2B credentials, prefer each provider's native environment or authentication. **Pi's text inputs are not masked**: never type API keys into an ordinary Pi input prompt.
 
-For masked API-key entry, read-only resource discovery and advanced diagnostics, install the optional CLI from npm. Alternatively, install `./onedotmint-reroute-0.3.0.tgz` from a successful GitHub Actions run:
+For masked API-key entry, read-only resource discovery and advanced diagnostics, install the optional CLI from npm. Alternatively, install `./onedotmint-reroute-0.3.1.tgz` from a successful GitHub Actions run:
 
 ~~~bash
-npm install -g @onedotmint/reroute@0.3.0
+npm install -g @onedotmint/reroute@0.3.1
 cd /path/to/your-project
 reroute setup
 reroute doctor --connect
@@ -182,4 +182,4 @@ Authorization defaults to **No**. Leave it off to save keys/configuration withou
 - Only dependency-download stores cross Sandbox lifetimes. Cargo `target` remains local scratch; npm dependencies are freshly installed from the lockfile per job. Download archives are isolated by project, provider, image and lock/toolchain inputs; archives are size-limited and checked against traversal, links and corruption. Cache warnings preserve the task exit code. Metrics include provision, execution, restore/save timings and cache hit; **no cloud speedup is claimed without live measurements**.
 - Cloud intents/leases/reservations live under `~/.local/state/reroute-v3/cloud` (or the existing state override), outside Git/project configuration. Preserve this directory. A crash/unknown task blocks replacement and destructive cleanup. `reroute resource recover --yes` releases only a dead local client lease and discovers the same owned allocation; it does not start, retry, delete or clear task locks. Missing/ambiguous resources need provider-console verification and manual support, not repeated creation.
 
-For the precise SDK evidence, retained billing risks, limitations and authorized live test steps, see [Managed cloud operations](docs/MANAGED-CLOUD.md). Managed **Daytona is live-verified**; managed **Modal has never been run against the real service**. Billing is unverified for both.
+For the precise SDK evidence, retained billing risks, limitations and authorized live test steps, see [Managed cloud operations](docs/MANAGED-CLOUD.md). Managed **Daytona is live-verified**. Managed **Modal has passed default-toolchain and real-repository cold/warm verification** at 2 physical CPU / 4 GiB on acceptance SHA `e6b68ad`: install, typecheck, build, tests (200 passed, 2 unchanged host-AFT skips), smoke, download-cache restore and compute release. The Modal executor preserves image PATH using a non-login shell. Broad speedup and live failure/recovery acceptance remain unverified. Billing is unverified for both.
