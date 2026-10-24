@@ -1,9 +1,9 @@
-node_modules/
+node_modules
+dist/
 .tools/
-.reroute/
-.env
-.env.*
+.artifacts/
 *.tgz
-*.zip
-*.log
-coverage/
+.reroute.json
+.reroute/
+.env*
+__pycache__/

@@ -1,9 +1,0 @@
-provider = "e2b"
-[runtime]
-idleTimeoutMinutes = 10
-[providers.e2b]
-template = "base"
-timeoutMs = 3600000
-autoPause = true
-# Build/select a template containing your project's toolchains.
-# CPU/RAM/image sizing is template-owned, not a portable Reroute field here.

@@ -1,12 +1,6 @@
 Reroute
-Copyright 2026 Reroute contributors
-Licensed under the Apache License, Version 2.0.
+Copyright 2026 Reroute contributors.
 
-This project was originally delivered as Outboard and is now named Reroute.
-No provider SDK, coding-agent runtime, GPL implementation, bundled toolchain,
-or third-party dependency source is redistributed. SDKs and harnesses remain
-separate installations with their own licenses and terms.
+Licensed under the Apache License, Version 2.0. See LICENSE.
 
-Public projects and official contracts informed design and compatibility work.
-See docs/REFERENCES.md for inspected files, limitations and licensing boundaries.
-No substantial implementation was copied from those reference projects.
+Third-party dependencies and external utilities are subject to their own applicable licenses and notices. No Mutagen or remote_compilation_helper implementation is included.

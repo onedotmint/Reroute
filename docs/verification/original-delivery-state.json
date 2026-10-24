@@ -1,9 +1,0 @@
-{
-  "branch": "main",
-  "commit": "444e17daa46ce026992db02878ddd71ac11803a5",
-  "tree": "e88181b7c879afdbf8ff1e726bd921362be20e18",
-  "workingTree": "clean",
-  "createdAt": "2026-10-06T13:59:19.657Z",
-  "files": 131,
-  "note": "Archive adds only this generated provenance file to the committed canonical source tree."
-}

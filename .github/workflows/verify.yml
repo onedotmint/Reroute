@@ -1,0 +1,74 @@
+name: Verify native Reroute
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: reroute-verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    env:
+      REROUTE_LIVE: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: npm-shrinkwrap.json
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      # Pinned, isolated prefix install so the real-AFT coexistence cases run instead of skipping.
+      # Installed outside the repo: AFT's optionalDependencies supply the native binary, and the
+      # project's locked dependency tree is left untouched.
+      - name: Install pinned AFT for real coexistence cases
+        run: |
+          npm install --prefix "$RUNNER_TEMP/aft" --no-package-lock --no-save --no-audit --no-fund \
+            @cortexkit/aft-pi@0.62.0
+          echo "REROUTE_AFT_EXTENSION=$RUNNER_TEMP/aft/node_modules/@cortexkit/aft-pi/dist/index.js" >> "$GITHUB_ENV"
+      - name: Strict types and build
+        run: npm run typecheck && npm run build
+      - name: Unit, component, provider and actual Pi SDK tests
+        run: npm test
+      - name: Offline CLI smoke
+        run: npm run smoke
+      - name: Install isolated SSH test prerequisites
+        run: sudo apt-get update -qq && sudo apt-get install -y openssh-server rsync
+      - name: Start real localhost OpenSSH server
+        run: bash scripts/ssh-test-server.sh
+      - name: Real SSH, rsync, Pi, artifacts and compiler-cache acceptance
+        run: npm run test:ssh
+      - name: Real Pi-native Git project install, trust, /reroute loader and removal
+        if: github.event_name == 'push' && github.repository == 'onedotmint/Reroute' && matrix.node == '22'
+        env:
+          REROUTE_GIT_COMMIT: ${{ github.sha }}
+        run: node scripts/verify-pi-git.mjs
+      - name: Measure local input preparation
+        run: npm run benchmark
+      - name: Pack and independently install this commit
+        run: npm run check:package
+      - name: Upload verified installer and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: reroute-npm-node-${{ matrix.node }}-${{ github.sha }}
+          path: .artifacts/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+      - name: Stop only the isolated test SSH daemon
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/reroute-sshd/pid" ]; then
+            sudo kill "$(cat "$RUNNER_TEMP/reroute-sshd/pid")" || true
+          fi
