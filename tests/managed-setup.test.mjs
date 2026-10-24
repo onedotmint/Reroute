@@ -7,10 +7,15 @@ import { setup } from '../dist/setup.js';
 import { presets } from '../dist/resources.js';
 import { hash } from '../dist/util.js';
 
-const managed = { nonInteractive:true, provider:'daytona', managed:true, preset:'small', image:'my-toolchain:reviewed', cpuHourUsd:'0.0504', memoryHourUsd:'0.0162' };
+const managed = { project:true, nonInteractive:true, provider:'daytona', managed:true, preset:'small', image:'my-toolchain:reviewed', cpuHourUsd:'0.0504', memoryHourUsd:'0.0162' };
 async function project(fn) {
-  const root = await mkdtemp(join(tmpdir(), 'reroute-managed-setup-'));
-  try { await fn(root); } finally { await rm(root, {recursive:true, force:true}); }
+  const base = await mkdtemp(join(tmpdir(), 'reroute-managed-setup-')), root = join(base, 'project');
+  const previous = {XDG_CONFIG_HOME:process.env.XDG_CONFIG_HOME, REROUTE_STATE_DIR:process.env.REROUTE_STATE_DIR};
+  process.env.XDG_CONFIG_HOME = join(base, 'config'); process.env.REROUTE_STATE_DIR = join(base, 'state');
+  try { await mkdir(root); await fn(root); } finally {
+    for (const [key,value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    await rm(base, {recursive:true, force:true});
+  }
 }
 
 test('managed setup is local-only, needs no ID, uses shared presets and defaults to unauthorized', async()=>{
@@ -45,7 +50,7 @@ test('Modal custom sizing and explicit billing authorization save without a live
 
 test('managed setup rejects missing rates, invalid input and incompatible policies without changing saved config', async()=>{
   await project(async root=>{
-    await setup(root, {nonInteractive:true, provider:'ssh', id:'offline-fixture'});
+    await setup(root, {project:true, nonInteractive:true, provider:'ssh', id:'offline-fixture'});
     const before = await readFile(join(root, '.reroute.json'), 'utf8');
     const bad = [
       {image:undefined}, {image:''}, {image:'bad\nimage'}, {cpuHourUsd:undefined}, {memoryHourUsd:undefined},
@@ -67,23 +72,23 @@ test('managed setup rejects missing rates, invalid input and incompatible polici
 
 test('existing providers and profile edits stay compatible; misplaced managed flags are not silently ignored', async()=>{
   await project(async root=>{
-    await setup(root, {nonInteractive:true, provider:'ssh', id:'offline-fixture', name:'existing'});
-    const config = await setup(root, {nonInteractive:true, name:'existing', tasks:'none'});
+    await setup(root, {project:true, nonInteractive:true, provider:'ssh', id:'offline-fixture', name:'existing'});
+    const config = await setup(root, {project:true, nonInteractive:true, name:'existing', tasks:'none'});
     assert.equal(config.profiles.existing.id, 'offline-fixture');
     assert.equal(config.profiles.existing.managed, undefined);
     assert.deepEqual(config.tasks, []);
-    const cloud = await setup(root, {nonInteractive:true, provider:'daytona', name:'cloud', id:'existing-sandbox', credential:'account-b'});
+    const cloud = await setup(root, {project:true, nonInteractive:true, provider:'daytona', name:'cloud', id:'existing-sandbox', credential:'account-b'});
     assert.equal(cloud.profiles.cloud.id, 'existing-sandbox');
     assert.equal(cloud.profiles.cloud.credential, 'account-b');
-    await assert.rejects(setup(root, {nonInteractive:true, name:'existing', monthlyUsd:'bad'}), /require --managed/);
+    await assert.rejects(setup(root, {project:true, nonInteractive:true, name:'existing', monthlyUsd:'bad'}), /require --managed/);
   });
 });
 
 test('editing managed policy requires explicit rates and does not carry prior authorization forward', async()=>{
   await project(async root=>{
     await setup(root, {...managed, authorize:true});
-    await assert.rejects(setup(root, {nonInteractive:true}), /cpu-hour-usd/);
-    const config = await setup(root, {nonInteractive:true, cpuHourUsd:'0.0504', memoryHourUsd:'0.0162'});
+    await assert.rejects(setup(root, {project:true, nonInteractive:true}), /cpu-hour-usd/);
+    const config = await setup(root, {project:true, nonInteractive:true, cpuHourUsd:'0.0504', memoryHourUsd:'0.0162'});
     assert.equal(config.profiles.default.managed.authorized, false);
     assert.deepEqual(config.profiles.default.compute, presets.small);
   });

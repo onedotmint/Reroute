@@ -8,7 +8,11 @@ import { PassThrough } from 'node:stream';
 import { helperCommand } from '../dist/engine.js';
 import { processExec,requireSuccess,feedInput,hash } from '../dist/util.js';
 test('unowned stale execution directory is retained, not adopted or archived by a failed new task',async t=>{
- const base=await mkdtemp(join(tmpdir(),'reroute-owned-'));t.after(()=>rm(base,{recursive:true,force:true}));const root=join(base,'remote'),id=randomUUID();
+ const base=await mkdtemp(join(tmpdir(),'reroute-owned-'));
+ const previous={XDG_CONFIG_HOME:process.env.XDG_CONFIG_HOME,REROUTE_STATE_DIR:process.env.REROUTE_STATE_DIR};
+ process.env.XDG_CONFIG_HOME=join(base,'config');process.env.REROUTE_STATE_DIR=join(base,'state');
+ t.after(async()=>{for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}await rm(base,{recursive:true,force:true});});
+ const root=join(base,'remote'),id=randomUUID();
  const control=async(action)=>processExec('bash',['-c',await helperCommand(action,{root,id})]);
  await requireSuccess(control('boot'));await requireSuccess(control('acquire'));await mkdir(join(root,'work'));await writeFile(join(root,'work','foreign.txt'),'leave alone');
  await writeFile(join(root,'jobs',id,'request.json'),JSON.stringify({files:[],cacheKey:hash(''),command:'true',cwd:'.',timeoutSeconds:10}));

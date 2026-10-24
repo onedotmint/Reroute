@@ -1,12 +1,18 @@
-import test from 'node:test';
+import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as sdk from '@earendil-works/pi-coding-agent';
 import { createRerouteTool, panel } from '../dist/pi.js';
-import { defaults, saveConfig, loadConfig } from '../dist/config.js';
+import { defaults, saveConfig, saveUserConfig, loadConfig, authorizeProject, userConfigPath } from '../dist/config.js';
 import { setup } from '../dist/setup.js';
+
+const isolated = await mkdtemp(join(tmpdir(), 'reroute-pi-isolation-'));
+process.env.XDG_CONFIG_HOME = join(isolated, 'config');
+process.env.REROUTE_STATE_DIR = join(isolated, 'state');
+after(() => rm(isolated, { recursive: true, force: true }));
+beforeEach(() => rm(userConfigPath(), { force: true }));
 
 test('actual Pi extension loader registers independent run/status tools and /reroute',async t=>{
  const root=await mkdtemp(join(tmpdir(),'reroute-pi-load-')),agent=join(root,'agent');await mkdir(agent);t.after(()=>rm(root,{recursive:true,force:true}));
@@ -40,7 +46,8 @@ test('ordinary native Bash remains local with native failure and truncation sema
 });
 test('independent tool routes eligible tasks using ctx.cwd, separated output, progress, signal and timeout',async t=>{
  const root=await mkdtemp(join(tmpdir(),'reroute-pi-route-'));t.after(()=>rm(root,{recursive:true,force:true}));
- await saveConfig(root,{...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'host'}}});
+  const config={...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'host'}}};
+  await saveConfig(root,config);await authorizeProject(root,config);
  const cwd=join(root,'nested');await mkdir(cwd);
  const abort=new AbortController(),updates=[];let calls=0;
  const tool=createRerouteTool(async(c,o)=>{
@@ -55,7 +62,7 @@ test('independent tool routes eligible tasks using ctx.cwd, separated output, pr
 });
 test('native panel changes routing without invoking a model or touching remote resources on open',async t=>{
  const root=await mkdtemp(join(tmpdir(),'reroute-pi-panel-'));t.after(()=>rm(root,{recursive:true,force:true}));await saveConfig(root,{...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'not-connected'}}});
- const choices=['Routing mode','local','Close'];const ctx={cwd:root,hasUI:true,ui:{select:async()=>choices.shift(),notify:()=>{},confirm:async()=>{throw Error('should not request resource changes')}}};
+ const choices=['Project overrides','Routing mode','local','Close'];const ctx={cwd:root,hasUI:true,ui:{select:async()=>choices.shift(),notify:()=>{},confirm:async()=>{throw Error('should not request resource changes')}}};
  await panel(ctx);assert.equal((await loadConfig(root)).config.mode,'local');
 });
 test('setup writes project config only, never personal or project Pi extensions/settings',async t=>{
@@ -68,7 +75,7 @@ test('setup writes project config only, never personal or project Pi extensions/
  const entry=join(agent,'extensions','reroute.ts');
  await mkdir(join(agent,'extensions'),{recursive:true});
  await writeFile(entry,'// user-authored extension - must never be touched\n');
- await setup(root,{nonInteractive:true,provider:'ssh',id:'host'});
+ await setup(root,{project:true,nonInteractive:true,provider:'ssh',id:'host'});
  assert.equal((await loadConfig(root)).config.active,'default');
  assert.equal(await readFile(entry,'utf8'),'// user-authored extension - must never be touched\n');
  await assert.rejects(readFile(join(piRoot,'settings.json'),'utf8'),/ENOENT/);
@@ -87,7 +94,7 @@ test('Pi overview shows configured profiles and local credential availability wi
 });
 test('Pi native menus add and forget local profiles without changing remote resources',async t=>{
  const root=await mkdtemp(join(tmpdir(),'reroute-pi-management-'));t.after(()=>rm(root,{recursive:true,force:true}));
- await saveConfig(root,{...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'existing-host'}}});
+ await saveUserConfig({...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'existing-host'}}});
  const menus=['Manage providers','Add provider','daytona','Close'];
  const answers=['cloud','existing-sandbox',''];
  const ctx={cwd:root,hasUI:true,ui:{
@@ -166,7 +173,7 @@ test('Pi profile edit cancellation does not save partial changes or contact prov
  t.after(()=>rm(root,{recursive:true,force:true}));
  const initial={...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'original-host'}}};
  await saveConfig(root,initial);
- const choices=['Manage providers','Edit provider','ssh','Keep current (ssh)','Close'];
+ const choices=['Project overrides','Manage providers','Edit provider','ssh','Keep current (ssh)','Close'];
  const answers=['different-host',undefined];
  await panel({cwd:root,hasUI:true,ui:{
    select:async()=>choices.shift(),input:async()=>answers.shift(),
@@ -178,7 +185,7 @@ test('Pi profile edit cancellation does not save partial changes or contact prov
 test('switching an existing profile is a local-only operation',async t=>{
  const root=await mkdtemp(join(tmpdir(),'reroute-pi-switch-'));
  t.after(()=>rm(root,{recursive:true,force:true}));
- await saveConfig(root,{...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'host'},cloud:{provider:'daytona',id:'sandbox'}}});
+ await saveUserConfig({...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'host'},cloud:{provider:'daytona',id:'sandbox'}}});
  const choices=['Manage providers','Switch active provider','cloud','Close'];
  await panel({cwd:root,hasUI:true,ui:{
    select:async()=>choices.shift(),notify:()=>{},
@@ -191,7 +198,7 @@ async function toolProject(t) {
  const root=await mkdtemp(join(tmpdir(),'reroute-tool-'));
  t.after(()=>rm(root,{recursive:true,force:true}));
  const config={...defaults(),active:'fixture',profiles:{fixture:{provider:'ssh',id:'fixture',root:root+'/remote'}}};
- await saveConfig(root,config);
+ await saveConfig(root,config);await authorizeProject(root,config);
  return {root,config};
 }
 test('local decisions and missing configuration decline without running remote or local commands',async t=>{
@@ -242,6 +249,7 @@ test('actual engine with mock Provider preserves receipts, cancellation, timeout
  const {runRemote}=await import('../dist/engine.js');const {parse}=await import('shell-quote');
  const previous=process.env.REROUTE_STATE_DIR;process.env.REROUTE_STATE_DIR=join(root,'state');
  t.after(()=>{if(previous===undefined)delete process.env.REROUTE_STATE_DIR;else process.env.REROUTE_STATE_DIR=previous;});
+ await authorizeProject(root,(await loadConfig(root)).config);
  await writeFile(join(root,'Makefile'),'test:\n\ttouch LOCAL_RETRY_MARKER\n');
  for(const scenario of ['success','nonzero','timed_out','cancelled','unknown','transport','upload']) {
    await t.test(scenario,async()=>{

@@ -89,5 +89,14 @@ export interface Job {
   error?: string;
   cacheWarning?: string;
   cost?: { estimatedUsd: number; runtimeSeconds: number; source: 'estimate'; balance: 'unavailable' };
-  metrics?: { inputBytes: number; inputMs: number; transferredBytes: number; transferMs: number; cacheKey: string; provisionMs?: number; executionMs?: number; cacheHit?: boolean; cacheSaved?: boolean; cacheRestoreMs?: number; cacheSaveMs?: number };
+  metrics?: {
+    inputBytes: number; inputMs: number; transferredBytes: number; transferMs: number; cacheKey: string;
+    // Local wall times; transferMs includes request, stage, pack, upload and seal.
+    prepareMs?: number; requestUploadMs?: number; requestBytes?: number; packMs?: number; archiveBytes?: number;
+    uploadMs?: number; uploadedBytes?: number; uploadFiles?: number; sealMs?: number;
+    // Remote helper times exclude API round trips. uploadedBytes excludes request/protocol overhead.
+    remoteStageMs?: number; remoteUnpackMs?: number; remoteVerifyMs?: number; remotePrepareMs?: number; cleanupMs?: number;
+    provisionMs?: number; releaseMs?: number; executionMs?: number; cacheHit?: boolean; cacheSaved?: boolean;
+    cacheRestoreMs?: number; cacheSaveMs?: number; cacheRestoreBytes?: number; cacheSaveBytes?: number;
+  };
 }

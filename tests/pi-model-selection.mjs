@@ -1,5 +1,6 @@
 // Opt-in, real-model acceptance: REROUTE_MODEL_ACCEPTANCE=1 node tests/pi-model-selection.mjs
 // Local isolated process/file fixture ONLY; this is neither SSH nor cloud acceptance.
+// Project-consent adaptation has not been re-run with a paid model; no general tool-selection stability claim.
 import assert from 'node:assert/strict';
 import { fork, execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -117,7 +118,11 @@ import {copyFile} from 'node:fs/promises';
 import {registerPi,createRerouteTool,createRerouteStatusTool} from ${JSON.stringify(join(repo, 'src/pi.ts'))};
 import {runRemote,inspectJob} from ${JSON.stringify(join(repo, 'src/engine.ts'))};
 import {processExec} from ${JSON.stringify(join(repo, 'src/util.ts'))};
-export default function(pi) {
+import {authorizeProject,loadConfig} from ${JSON.stringify(join(repo, 'src/config.ts'))};
+export default async function(pi) {
+ // Explicit test-only consent after both model-acceptance opt-in checks, in isolated local state.
+ const configured=await loadConfig(${JSON.stringify(cwd)});
+ await authorizeProject(configured.root,configured.config);
  const probe=globalThis[Symbol.for('reroute.model-selection.probe')];
  // Native local process/file Provider fixture: no SSH transport or cloud account capabilities.
  const provider={profile:{provider:'ssh',id:'fixture-contract.invalid',root:${JSON.stringify(remote)}},stdin:true,

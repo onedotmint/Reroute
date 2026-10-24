@@ -10,8 +10,8 @@ with tempfile.TemporaryDirectory(prefix='reroute-wizard-') as base:
     def wizard(cancel=False):
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH",40,120,0,0))
-        env=dict(os.environ, TERM='xterm-256color', CI='false')
-        child=subprocess.Popen([node,entry,'setup','--advanced','--no-pi'],cwd=base,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
+        env=dict(os.environ, TERM='xterm-256color', CI='false', XDG_CONFIG_HOME=base+'/config', REROUTE_STATE_DIR=base+'/state')
+        child=subprocess.Popen([node,entry,'setup','--project','--advanced','--no-pi'],cwd=base,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
         os.close(slave); log=''
         def prompt(text, response):
             nonlocal log
@@ -64,9 +64,9 @@ with tempfile.TemporaryDirectory(prefix='reroute-daytona-') as base:
     project=pathlib.Path(base,'project'); project.mkdir()
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH",42,130,0,0))
-    env=dict(os.environ, TERM='xterm-256color', CI='false', XDG_CONFIG_HOME=str(project/'config') if mode=='unsafe' else base+'/config')
+    env=dict(os.environ, TERM='xterm-256color', CI='false', XDG_CONFIG_HOME=str(project/'config') if mode=='unsafe' else base+'/config', REROUTE_STATE_DIR=base+'/state')
     env.pop('DAYTONA_API_KEY',None)
-    child=subprocess.Popen([node,entry,'setup','--advanced','--no-pi'],cwd=project,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
+    child=subprocess.Popen([node,entry,'setup','--project','--advanced','--no-pi'],cwd=project,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
     os.close(slave); log=''; transcript=''
     def prompt(phrase, answer):
         global log, transcript
@@ -133,9 +133,9 @@ with tempfile.TemporaryDirectory(prefix='reroute-managed-wizard-') as base:
         project=folder/'project'; project.mkdir()
         master, slave=pty.openpty()
         fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',50,160,0,0))
-        env=dict(os.environ,TERM='xterm-256color',CI='false',XDG_CONFIG_HOME=str(folder/'config'),
+        env=dict(os.environ,TERM='xterm-256color',CI='false',XDG_CONFIG_HOME=str(folder/'config'),REROUTE_STATE_DIR=str(folder/'state'),
             DAYTONA_API_KEY='wrong-default-account',MODAL_TOKEN_ID='wrong-default-id',MODAL_TOKEN_SECRET='wrong-default-secret')
-        child=subprocess.Popen([node,entry,'setup','--advanced','--no-pi'],cwd=project,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
+        child=subprocess.Popen([node,entry,'setup','--project','--advanced','--no-pi'],cwd=project,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
         os.close(slave); log=''; transcript=''
         def prompt(phrase,answer):
             global log,transcript
@@ -198,7 +198,7 @@ with tempfile.TemporaryDirectory(prefix='reroute-managed-wizard-') as base:
             assert 'After saving, check connection' not in transcript
             if provider=='modal':
                 assert 'physical cores (not vCPU)' in transcript
-                assert 'live acceptance is not established' in transcript
+                assert 'broad recovery and billing unverified' in transcript
         finally:
             if child.poll() is None: child.kill();child.wait()
             os.close(master)

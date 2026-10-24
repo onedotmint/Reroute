@@ -11,14 +11,16 @@ with tempfile.TemporaryDirectory(prefix='reroute-quick-setup-') as base:
     base=pathlib.Path(base)
     project=base/'project'; project.mkdir()
     config=base/'private'; secrets=config/'reroute'/'accounts'
-    config_file=project/'.reroute.json'
+    project_file=project/'.reroute.json'
+    config_file=config/'reroute'/'config.json' if case=='global' else project_file
     original=None
-    if case in ('keep','cancel-existing','add-account'):
+    if case in ('keep','cancel-existing','add-account','global'):
         original={'version':3,'active':'old-ssh','mode':'auto','profiles':{
             'old-ssh':{'provider':'ssh','id':'existing-host','port':2200},
             'old-cloud':{'provider':'daytona','id':'existing-sandbox'}},
             'tasks':['test'],'remote':[['trusted','build']],'local':[['npm','test']],'timeoutSeconds':123}
-        config_file.write_text(json.dumps(original))
+        project_file.write_text(json.dumps(original))
+        original_bytes=project_file.read_bytes()
     if case=='named':
         secrets.mkdir(parents=True,mode=0o700)
         path=secrets/'daytona.json'; path.write_text(json.dumps({'DAYTONA_API_KEY':'already-saved-private'}));path.chmod(0o600)
@@ -30,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='reroute-quick-setup-') as base:
     if case=='environment':env['DAYTONA_API_KEY']='environment-private-token'
     master,slave=pty.openpty()
     fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',52,160,0,0))
-    child=subprocess.Popen([node,entry,'setup'],cwd=project,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
+    child=subprocess.Popen([node,entry,'setup']+([] if case=='global' else ['--project']),cwd=project,env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
     os.close(slave);log='';transcript=''
     def prompt(phrase,answer):
         global log,transcript
@@ -100,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix='reroute-quick-setup-') as base:
             for name,value in original['profiles'].items():assert saved['profiles'][name]==value
             assert saved['profiles']['daytona-work']['credential']=='daytona-work'
             assert (secrets/'daytona-work.json').exists()
-        elif case in ('both','authorize','cancel-final','cancel-existing','cancel-second-key','unsafe'):
+        elif case in ('both','global','authorize','cancel-final','cancel-existing','cancel-second-key','unsafe'):
             prompt('Choose providers',b'\x1b[B \r')
             if case=='cancel-existing':
                 prompt('daytona — use a saved profile',b'\x1b[B\r')
@@ -116,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix='reroute-quick-setup-') as base:
                 prompt('Compute & budget',b'\r')
                 prompt('Default provider for this project',b'\r' if case=='cancel-existing' else b'\x1b[B\r')
                 prompt('Authorize future paid',b'y\r' if case=='authorize' else b'\r')
-                prompt('Save these project profiles',b'\x03' if case in ('cancel-final','cancel-existing') else b'\r')
+                prompt('Save these user defaults' if case=='global' else 'Save these project profiles',b'\x03' if case in ('cancel-final','cancel-existing') else b'\r')
                 finish(125 if case in ('cancel-final','cancel-existing','unsafe') else 0)
                 if case=='cancel-existing':
                     assert config_file.read_text()==json.dumps(original)
@@ -168,14 +170,17 @@ with tempfile.TemporaryDirectory(prefix='reroute-quick-setup-') as base:
         for private in ('masked-fixture-DAYTONA_API_KEY','masked-fixture-MODAL_TOKEN_ID','masked-fixture-MODAL_TOKEN_SECRET','already-saved-private','environment-private-token'):
             assert private not in transcript,'unmasked credential in terminal output'
             if config_file.exists():assert private not in config_file.read_text(),'credential in project config'
-        assert not (base/'state').exists(),'setup must not allocate cloud ownership or resources'
+        if case=='global':
+            assert project_file.read_bytes()==original_bytes,'global setup changed the existing project config'
+            assert config_file.stat().st_mode&0o777==0o600
+        assert not (base/'state').exists(),'setup must not allocate cloud ownership, resources or project consent'
     finally:
         if child.poll() is None:child.kill();child.wait()
         os.close(master)
 print('quick setup '+case+' passed')
 `;
 
-for(const scenario of ['both','authorize','cancel-start','cancel-second-key','cancel-final','cancel-existing','ssh','keep','add-account','later','environment','named','custom','unsafe','advanced','mixed-advanced']){
+for(const scenario of ['both','global','authorize','cancel-start','cancel-second-key','cancel-final','cancel-existing','ssh','keep','add-account','later','environment','named','custom','unsafe','advanced','mixed-advanced']){
  test('real quick setup PTY: '+scenario,{timeout:20000},()=>{
   const result=spawnSync('python3',['-c',script,process.execPath,resolve('bin/reroute.mjs'),scenario],{encoding:'utf8',timeout:18000});
   assert.equal(result.status,0,result.stderr||result.stdout||String(result.error));

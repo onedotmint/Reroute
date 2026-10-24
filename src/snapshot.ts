@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import ignore from 'ignore';
 import { hash, processExec, safeRelative, noSymlink, inside } from './util.js';
 import { secretFile } from './auth.js';
+import { stateDir, userConfigPath } from './config.js';
 import type { Entry, Snapshot } from './types.js';
 const excluded = new Set(['.git','.hg','.svn','node_modules','target','dist','build','.next','.nuxt','.venv','venv','__pycache__','.cache','.pytest_cache','.mypy_cache','.ruff_cache','.tox','.turbo','.gradle','.idea','.ssh','.aws','.azure','.config','.docker','.kube','.gnupg','.reroute','.reroute.json','.DS_Store']);
 const sensitive = /^(?:\.modal\.toml|\.git-credentials|\.dockercfg|\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|id_(?:rsa|ed25519|ecdsa)(?:\.pub)?|credentials(?:\..*)?|secrets?(?:\..*)?)$|\.(?:pem|key|p12|pfx|keystore)$/i;
@@ -72,7 +73,11 @@ export async function snapshot(rootInput: string, options: { afterCopy?: () => P
   const start = performance.now(), root = await realpath(rootInput), dir = await mkdtemp(join(tmpdir(), 'reroute-input-'));
   const cleanup = () => rm(dir, { recursive: true, force: true });
   try {
-    const privatePaths = await Promise.all((options.privatePaths ?? []).map(path => realpath(path).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return resolve(path); throw error; })));
+    const canonical = (path: string) => realpath(path).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return resolve(path); throw error; });
+    const state = await canonical(stateDir());
+    if (inside(state, root)) throw new Error('Project overlaps the private state directory; source snapshot refused');
+    const privateInputs = [...(options.privatePaths ?? []), userConfigPath(), stateDir()];
+    const privatePaths = [...privateInputs.map(path => resolve(path)), ...await Promise.all(privateInputs.map(canonical))];
     const paths = await list(root, privatePaths), files: Entry[] = [];
     let bytes = 0;
     for (const path of paths) {
@@ -88,7 +93,7 @@ export async function snapshot(rootInput: string, options: { afterCopy?: () => P
       if (JSON.stringify(entry) !== JSON.stringify(await fingerprint(root, entry.path))) throw new Error(`Source changed while preparing input: ${entry.path}; no task started`);
     }
     const digest = hash(JSON.stringify(files));
-    const cacheKey = hash(JSON.stringify(files.filter(f => /(^|\/)(Cargo.lock|package-lock.json|pnpm-lock.yaml|yarn.lock|bun.lockb?|uv.lock|poetry.lock|requirements.*\.txt|rust-toolchain(?:\.toml)?|\.nvmrc|\.python-version)$/.test(f.path))));
+    const cacheKey = hash(JSON.stringify(files.filter(f => /(^|\/)(Cargo\.(?:lock|toml)|npm-shrinkwrap\.json|package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|uv\.lock|poetry\.lock|Pipfile(?:\.lock)?|pyproject\.toml|requirements[^/]*\.txt|rust-toolchain(?:\.toml)?|\.nvmrc|\.node-version|\.python-version|\.tool-versions)$/.test(f.path))));
     return { dir, files, bytes, digest, cacheKey, milliseconds: performance.now() - start, cleanup };
   } catch (e) { await cleanup(); throw e; }
 }

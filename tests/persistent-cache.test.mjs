@@ -21,16 +21,16 @@ volume.mkdir()
 key = 'a' * 64
 restore, save = task.restore_cache, task.save_cache
 
-def restore_local(cache, mounted, cache_key):
+def restore_local(cache, mounted, cache_key, metrics=None):
     assert mounted == '/var/reroute-cache'
-    return restore(cache, volume, cache_key)
+    return restore(cache, volume, cache_key, metrics)
 
-def save_local(cache, mounted, cache_key):
+def save_local(cache, mounted, cache_key, metrics=None):
     assert mounted == '/var/reroute-cache'
     owner = (root / 'lock' / 'owner').read_text()
     process = task.read(root / 'jobs' / owner / 'process.json')
     assert not task.group_alive(process['child']), 'saved before process group stopped'
-    return save(cache, volume, cache_key)
+    return save(cache, volume, cache_key, metrics)
 
 task.restore_cache, task.save_cache = restore_local, save_local
 
@@ -95,6 +95,8 @@ assert cold['code'] == 0 and cold['status'] == 'exited'
 assert cold['metrics']['cacheHit'] is False
 for metric in ('cacheRestoreMs', 'cacheSaveMs', 'executionMs'):
     assert cold['metrics'][metric] > 0, cold
+assert cold['metrics']['cacheRestoreBytes'] == 0
+assert cold['metrics']['cacheSaveBytes'] == saved_archive().stat().st_size
 assert 'cacheWarning' not in cold
 with tarfile.open(saved_archive()) as tf:
     names = tf.getnames()
@@ -104,6 +106,7 @@ with tarfile.open(saved_archive()) as tf:
     assert all(m.isdir() or m.isreg() for m in tf)
 warm = run('test "$(cat "$CARGO_TARGET_DIR/compiled")" = compiled; test "$(cat "$CARGO_HOME/registry/blob")" = registry')
 assert warm['code'] == 0 and warm['metrics']['cacheHit'] is True
+assert warm['metrics']['cacheRestoreBytes'] > 0 and warm['metrics']['cacheSaveBytes'] > 0
 shutil.rmtree(root)
 rebuilt = run('''
 set -eu
@@ -464,7 +467,7 @@ assert prior.read_bytes() == previous and list(volume.iterdir()) == [prior]
 
 test('cancellation during cache restore never starts the project command',async t=>{
   await python(t, String.raw`
-def cancel_during_restore(cache, mounted, cache_key):
+def cancel_during_restore(cache, mounted, cache_key, metrics=None):
     owner = (root / 'lock' / 'owner').read_text()
     (root / 'jobs' / owner / 'cancel').touch()
     return False
@@ -512,5 +515,135 @@ task.time.monotonic = tick
 task.time.sleep = lambda seconds: None
 assert task.terminate_group(12345) is False
 assert calls == [], 'signalled a group without any owned descendants'
+`);
+});
+
+
+test('Modal mount aliases preserve download caches across scratch reconstruction', async t => {
+  await python(t, String.raw`
+task.CACHE_VOLUME_PATH = base / 'mounted-cache'
+task.MODAL_VOLUME_ROOT = base / 'modal-volumes'
+backing = task.MODAL_VOLUME_ROOT / 'vo-fixture'
+backing.mkdir(parents=True)
+volume = task.CACHE_VOLUME_PATH
+volume.symlink_to(backing, target_is_directory=True)
+cold = run('mkdir -p "$CARGO_HOME/registry"; printf persisted > "$CARGO_HOME/registry/blob"')
+assert cold['code'] == 0 and cold['metrics']['cacheSaved'] is True, cold
+assert 'cacheWarning' not in cold, cold
+shutil.rmtree(root)
+warm = run('test "$(cat "$CARGO_HOME/registry/blob")" = persisted')
+assert warm['code'] == 0 and warm['metrics']['cacheHit'] is True, warm
+assert warm['metrics']['cacheSaved'] is True and 'cacheWarning' not in warm, warm
+assert len(list(backing.glob(key + '.*.tgz'))) == 2
+# Archive contents remain untrusted even behind a valid provider mount.
+archive([('cargo/registry/link', tarfile.SYMTYPE, b'')])
+try:
+    restore(root / 'cache' / key, volume, key)
+    raise AssertionError('accepted linked archive member through Modal mount')
+except ValueError:
+    pass
+`);
+});
+
+test('Modal mount allowance rejects unexpected targets, linked ancestors and linked cache files', async t => {
+  await python(t, String.raw`
+task.CACHE_VOLUME_PATH = base / 'mounted-cache'
+task.MODAL_VOLUME_ROOT = base / 'modal-volumes'
+backing = task.MODAL_VOLUME_ROOT / 'vo-fixture'
+backing.mkdir(parents=True)
+mounted = task.CACHE_VOLUME_PATH
+mounted.symlink_to(backing, target_is_directory=True)
+assert task.cache_archive(mounted, key) == backing / (key + '.tgz')
+
+def refused(path):
+    try:
+        task.cache_archive(path, key)
+        raise AssertionError('accepted unsafe cache path: ' + str(path))
+    except ValueError:
+        pass
+
+# Only the fixed mount entry may be a link; neither arbitrary aliases nor targets qualify.
+alias = base / 'other-alias'
+alias.symlink_to(backing, target_is_directory=True)
+refused(alias)
+for target in (base, task.MODAL_VOLUME_ROOT, task.MODAL_VOLUME_ROOT / 'not-a-volume', pathlib.Path('modal-volumes/vo-fixture'), backing / '..' / '..' / 'outside'):
+    mounted.unlink()
+    mounted.symlink_to(target, target_is_directory=True)
+    refused(mounted)
+mounted.unlink()
+mounted.symlink_to(backing, target_is_directory=True)
+# A matching Volume ID must still name a real directory, not another link.
+backing.rmdir()
+backing.symlink_to(base, target_is_directory=True)
+refused(mounted)
+backing.unlink()
+backing.mkdir()
+# A link anywhere above the canonical Volume target is still rejected.
+native = base / 'native'
+task.MODAL_VOLUME_ROOT.rename(native)
+task.MODAL_VOLUME_ROOT.symlink_to(native, target_is_directory=True)
+refused(mounted)
+task.MODAL_VOLUME_ROOT.unlink()
+native.rename(task.MODAL_VOLUME_ROOT)
+# Mount ancestors, legacy archives and generation archives keep their no-link checks.
+parent_alias = base / 'parent-alias'
+parent_alias.symlink_to(base, target_is_directory=True)
+task.CACHE_VOLUME_PATH = parent_alias / mounted.name
+refused(task.CACHE_VOLUME_PATH)
+task.CACHE_VOLUME_PATH = mounted
+(backing / (key + '.tgz')).symlink_to(base / 'outside')
+refused(mounted)
+(backing / (key + '.tgz')).unlink()
+generation = backing / (key + '.' + 'b' * 32 + '.' + 'c' * 64 + '.tgz')
+generation.symlink_to(base / 'outside')
+try:
+    task.cache_generations(mounted, key)
+    raise AssertionError('accepted symlink cache generation')
+except ValueError:
+    pass
+`);
+});
+
+test('opt-in supervisor progress emits real cache/execute/cleanup/save boundaries without changing receipts',async t=>{
+  await python(t,String.raw`
+original_main, original_write = task.main, os.write
+frames = []
+def observed_write(fd, payload):
+    if fd == 2:
+        frames.append(payload)
+        return len(payload)
+    return original_write(fd, payload)
+os.write = observed_write
+# No opt-in: no marker bytes even during cache operations.
+plain = run('exit 7')
+assert plain['code'] == 7 and frames == []
+def opted_main(action, data):
+    return original_main(action, {**data, **({'progressToken': 'a' * 32} if action == 'run' else {})})
+task.main = opted_main
+result = run('exit 9')
+assert result['code'] == 9 and result['status'] == 'exited'
+expected = ['cache-restore', 'execute', 'cleanup', 'cache-save']
+assert frames == [b'\x1eREROUTE_PROGRESS:' + b'a' * 32 + b':' + stage.encode() + b'\x1f' for stage in expected], frames
+def disconnected(fd, payload):
+    raise BrokenPipeError('observer gone')
+os.write = disconnected
+result = run('exit 11')
+assert result['code'] == 11 and result['status'] == 'exited'
+`);
+});
+
+
+test('unverifiable supervisor identity fails closed before launching a child',async t=>{
+  await python(t,String.raw`
+original_proc = task.proc
+task.proc = lambda pid: None if pid == os.getpid() else original_proc(pid)
+try:
+    run('touch SHOULD_NOT_START', persistentCache=None)
+    raise AssertionError('started without verified supervisor identity')
+except ValueError as error:
+    assert str(error) == 'Cannot verify supervisor process identity'
+assert not list(root.glob('jobs/*/process.json'))
+assert not list(root.glob('jobs/*/work/SHOULD_NOT_START'))
+assert (root / 'lock').is_dir()
 `);
 });

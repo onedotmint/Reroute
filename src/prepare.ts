@@ -12,12 +12,12 @@ export async function nodePreparation(input: string, cwd: string, command: strin
   let dir=cwd;
   for(;;){
     const path=join(input,dir);
-    for(const [file,manager] of [['pnpm-lock.yaml','pnpm'],['package-lock.json','npm'],['yarn.lock','yarn'],['bun.lock','bun'],['bun.lockb','bun']]){
+    for(const [file,manager] of [['pnpm-lock.yaml','pnpm'],['npm-shrinkwrap.json','npm'],['package-lock.json','npm'],['yarn.lock','yarn'],['bun.lock','bun'],['bun.lockb','bun']]){
       try{await access(join(path,file!));}catch{continue;}
       let pkg:{packageManager?:string};try{pkg=JSON.parse(await readFile(join(path,'package.json'),'utf8'));}catch{throw new Error(`Lockfile without a readable package.json: ${dir}/${file}`);}
       const executable=['npm','pnpm','yarn','bun'].includes(args[0]!)?args[0]!:manager!;
       if(executable!==manager)continue;
-      const argv=manager==='npm'?['npm','ci','--no-audit','--no-fund']:manager==='pnpm'?['pnpm','install','--frozen-lockfile']:manager==='bun'?['bun','install','--frozen-lockfile']:['yarn','install',/^yarn@[2-9]/.test(pkg.packageManager??'')?'--immutable':'--frozen-lockfile'];
+      const argv=manager==='npm'?['npm','ci','--no-audit','--no-fund']:manager==='pnpm'?['pnpm','install','--frozen-lockfile']:manager==='bun'?['bun','install','--frozen-lockfile']:['yarn','install',Number(pkg.packageManager?.match(/^yarn@(\d+)/)?.[1])>=2?'--immutable':'--frozen-lockfile'];
       return {cwd:dir,argv};
     }
     if(dir==='.')return;dir=posix.dirname(dir);

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { projectExecutionHints, HISTORY_PREFIX } from '../dist/history.js';
 import { createRerouteTool, registerPi } from '../dist/pi.js';
 import { defaults, saveConfig, saveJob } from '../dist/config.js';
+import { createEventBus } from '@earendil-works/pi-coding-agent';
 
 const now=Date.now(),profile={provider:'ssh',id:'existing-host'};
 function job(patch={}){return {id:randomUUID(),project:'/project',profile:{...profile},command:'cargo test',cwd:'.',createdAt:new Date(now-1000).toISOString(),status:'exited',code:0,
@@ -59,19 +60,19 @@ test('tool guidance is short and distinguishes contextual tool choice from polic
 
 async function fixture(t){
  const root=await mkdtemp(join(tmpdir(),'reroute-history-')),state=join(root,'state'),project=join(root,'project');await mkdir(project);
- const old=process.env.REROUTE_STATE_DIR;process.env.REROUTE_STATE_DIR=state;
- t.after(async()=>{if(old===undefined)delete process.env.REROUTE_STATE_DIR;else process.env.REROUTE_STATE_DIR=old;await rm(root,{recursive:true,force:true});});
+ const old=process.env.REROUTE_STATE_DIR,oldXdg=process.env.XDG_CONFIG_HOME;process.env.REROUTE_STATE_DIR=state;process.env.XDG_CONFIG_HOME=join(root,'config');
+ t.after(async()=>{if(old===undefined)delete process.env.REROUTE_STATE_DIR;else process.env.REROUTE_STATE_DIR=old;if(oldXdg===undefined)delete process.env.XDG_CONFIG_HOME;else process.env.XDG_CONFIG_HOME=oldXdg;await rm(root,{recursive:true,force:true});});
  const config={...defaults(),active:'local-fixture',profiles:{'local-fixture':profile}};await saveConfig(project,config);
  for(let i=0;i<2;i++)await saveJob(job({project}));
  const handlers=new Map(),tools=[];
- registerPi({on:(name,handler)=>handlers.set(name,handler),registerTool:tool=>tools.push(tool),registerCommand:()=>{}});
+ registerPi({events:createEventBus(),on:(name,handler)=>handlers.set(name,handler),registerTool:tool=>tools.push(tool),registerCommand:()=>{}});
  const base=tools[0].promptGuidelines;
  const event={systemPromptOptions:{selectedTools:['bash','reroute_run'],hiddenTools:[],toolGuidelines:{reroute_run:[...base],bash:['AFT-owned guideline']}}};
  return {project,state,config,event,handler:handlers.get('before_agent_start'),base,handlers,tools};
 }
 test('optional history changes only Reroute tool guidelines, never grows across turns or intercepts Bash',async t=>{
  const f=await fixture(t),ctx={cwd:f.project};
- assert.deepEqual(f.tools.map(t=>t.name),['reroute_run','reroute_status']);assert.deepEqual([...f.handlers.keys()],['before_agent_start']);
+ assert.deepEqual(f.tools.map(t=>t.name),['reroute_run','reroute_status']);assert.deepEqual([...f.handlers.keys()],['session_shutdown','before_agent_start']);
  assert.equal(await f.handler(f.event,ctx),undefined);
  const first=[...f.event.systemPromptOptions.toolGuidelines.reroute_run];assert.equal(first.length,f.base.length+1);
  await f.handler(f.event,ctx);assert.deepEqual(f.event.systemPromptOptions.toolGuidelines.reroute_run,first);
@@ -100,4 +101,27 @@ test('disabled tools and unauthorized managed profiles cannot contribute history
  await saveConfig(f.project,f.config);
  for(let i=0;i<2;i++)await saveJob(job({project:f.project,profile:{...f.config.profiles['local-fixture'],id:'sb-owned'}}));
  await f.handler(f.event,ctx);assert.deepEqual(f.event.systemPromptOptions.toolGuidelines.reroute_run,f.base);
+});
+
+
+test('bounded static environment hints replace prior hints, warn about starter tools and never execute setup',async t=>{
+ const f=await fixture(t),ctx={cwd:f.project};
+ const {TOOLCHAIN_IMAGE}=await import('../dist/toolchain.js');
+ f.config.profiles['local-fixture'].image=TOOLCHAIN_IMAGE;await saveConfig(f.project,f.config);
+ await writeFile(join(f.project,'package.json'),JSON.stringify({packageManager:'pnpm@10.1.0',engines:{node:'>=22'},scripts:{postinstall:'touch MUST_NOT_EXECUTE'}}));
+ await writeFile(join(f.project,'pnpm-lock.yaml'),'lockfileVersion: 9');
+ await f.handler(f.event,ctx);
+ const hints=f.event.systemPromptOptions.toolGuidelines.reroute_run.filter(line=>line.startsWith('Reroute environment: '));
+ assert.equal(hints.length,2);assert.ok(hints.every(line=>line.length<600));
+ assert.match(hints[0],/pnpm@10.1.0/);assert.match(hints[0],/NOT verified remote compatibility/);
+ assert.ok(hints[1].includes('does not include pnpm/yarn/bun'));
+ assert.match(hints[1],/no implicit installation/);
+ await f.handler(f.event,ctx);
+ assert.deepEqual(f.event.systemPromptOptions.toolGuidelines.reroute_run,[...f.base,...hints]);
+ await writeFile(join(f.state,'jobs',randomUUID()+'.json'),'{broken');
+ await assert.doesNotReject(f.handler(f.event,ctx));
+ assert.deepEqual(f.event.systemPromptOptions.toolGuidelines.reroute_run,[...f.base,...hints]);
+ const {access}=await import('node:fs/promises');
+ await assert.rejects(access(join(f.project,'MUST_NOT_EXECUTE')),/ENOENT/);
+ assert.deepEqual(f.event.systemPromptOptions.toolGuidelines.bash,['AFT-owned guideline']);
 });

@@ -1,6 +1,6 @@
 {
   "name": "@onedotmint/reroute",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Keep Pi and source local; offload build, test and compute through native remote tools",
   "keywords": ["pi-package", "pi-extension", "remote-builds", "development-tools"],
   "type": "module",

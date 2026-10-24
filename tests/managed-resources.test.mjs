@@ -250,3 +250,21 @@ test('matching IDs and owners from a different provider do not block managed res
  await f.execute();await managedAction(f.root,f.c,'stop',f.factory);
  assert.deepEqual(f.calls.filter(c=>c[0]==='lifecycle').map(c=>c[1]),['stop']);
 });
+
+
+test('resource progress reflects allocation and release, measured release survives and observer failures are harmless',async t=>{
+  const f=await fixture(t),stages=[];
+  const result=await f.execute({onProgress:p=>stages.push(p.stage)});
+  assert.deepEqual(stages,['budget','provision','release','complete']);
+  assert.ok(result.job.metrics.releaseMs>=0);
+  const again=await f.execute({onProgress:()=>{throw new Error('UI closed');}});
+  assert.equal(again.job.status,'exited');
+});
+
+test('release failures remain separately labelled rather than replacing the task exit receipt',async t=>{
+  const f=await fixture(t);
+  const factory=p=>({...f.factory(p),idle:async()=>{throw new Error('network release lost');}});
+  const result=await withManagedResource(f.root,f.c,'cargo test',{},f.run,factory);
+  assert.equal(result.job.code,0);assert.equal(result.job.status,'exited');
+  assert.match(result.job.error,/\[resource-cleanup\]/);assert.ok(result.job.metrics.releaseMs>=0);
+});

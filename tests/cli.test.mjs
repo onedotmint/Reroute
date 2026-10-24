@@ -5,11 +5,11 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { processExec } from '../dist/util.js';
 const bin=resolve('bin/reroute.mjs');
-async function fixture(t){const cwd=await mkdtemp(join(tmpdir(),'reroute-cli-'));t.after(()=>rm(cwd,{recursive:true,force:true}));const env={...process.env,PI_CODING_AGENT_DIR:join(cwd,'pi'),REROUTE_STATE_DIR:join(cwd,'state')};return {cwd,run:(...args)=>processExec(process.execPath,[bin,...args],{cwd,env,timeoutMs:10000})};}
+async function fixture(t){const cwd=await mkdtemp(join(tmpdir(),'reroute-cli-'));t.after(()=>rm(cwd,{recursive:true,force:true}));const env={...process.env,PI_CODING_AGENT_DIR:join(cwd,'pi'),XDG_CONFIG_HOME:join(cwd,'config'),REROUTE_STATE_DIR:join(cwd,'state')};return {cwd,run:(...args)=>processExec(process.execPath,[bin,...args],{cwd,env,timeoutMs:10000})};}
 test('standalone CLI setup/configuration, offline routing, argv quoting and local exit status',async t=>{
  const {cwd,run}=await fixture(t);
  assert.equal((await run('--help')).code,0);
- const setup=await run('setup','--non-interactive','--provider','ssh','--id','existing-host','--no-pi');assert.equal(setup.code,0,setup.stderr);
+ const setup=await run('setup','--project','--non-interactive','--provider','ssh','--id','existing-host','--no-pi');assert.equal(setup.code,0,setup.stderr);
  assert.equal((await stat(join(cwd,'.reroute.json'))).mode&0o777,0o600);
  assert.equal(JSON.parse((await run('explain','--','cargo','test')).stdout).route,'remote');
  assert.equal(JSON.parse((await run('explain','--shell','cargo test && echo x')).stdout).route,'local');
@@ -20,9 +20,9 @@ test('standalone CLI setup/configuration, offline routing, argv quoting and loca
 });
 test('setup preserves legacy state and unknown command/flags fail',async t=>{
  const {cwd,run}=await fixture(t);await writeFile(join(cwd,'reroute.toml'),'legacy=true\n');
- const blocked=await run('setup','--non-interactive','--provider','ssh','--id','host','--no-pi');assert.notEqual(blocked.code,0);assert.match(blocked.stderr,/Legacy/);
+ const blocked=await run('setup','--project','--non-interactive','--provider','ssh','--id','host','--no-pi');assert.notEqual(blocked.code,0);assert.match(blocked.stderr,/Legacy/);
  assert.equal(await readFile(join(cwd,'reroute.toml'),'utf8'),'legacy=true\n');
- assert.equal((await run('setup','--non-interactive','--provider','ssh','--id','host','--no-pi','--ignore-legacy')).code,0);
+ assert.equal((await run('setup','--project','--non-interactive','--provider','ssh','--id','host','--no-pi','--ignore-legacy')).code,0);
  assert.notEqual((await run('--not-a-real-flag')).code,0);assert.notEqual((await run('exec')).code,0);
  assert.notEqual((await run('resource','resume','--yes')).code,0);
 });

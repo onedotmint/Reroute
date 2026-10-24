@@ -80,6 +80,44 @@ def verify(directory, manifest):
         os.chmod(p, info['mode'] & 0o777)
 
 
+def unpack_input(archive, seed, manifest, names, info):
+    # The stage plan indexes a gzip stream of file bytes, not attacker-controlled tar paths.
+    if not isinstance(names, list) or len(set(names)) != len(names) or any(name not in manifest for name in names):
+        raise ValueError('Invalid input archive plan')
+    size = info.get('bytes')
+    digest = info.get('sha256')
+    if type(size) is not int or not 0 <= size <= 513 * 1024 * 1024 or not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest):
+        raise ValueError('Invalid input archive receipt')
+    if not archive.is_file() or archive.stat().st_size != size or sha(archive) != digest:
+        raise ValueError('Input archive checksum mismatch')
+    if sum(manifest[name]['size'] for name in names) > 512 * 1024 * 1024:
+        raise ValueError('Input archive exceeds expanded limit')
+    # Verify the full stream before replacing any baseline input, including its gzip trailer.
+    with tempfile.TemporaryDirectory(prefix='.input-unpack-', dir=archive.parent) as temporary:
+        stage = pathlib.Path(temporary)
+        with gzip.GzipFile(filename=archive, mode='rb') as stream:
+            for name in names:
+                destination = clean_path(stage / safe(name))
+                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                remaining = manifest[name]['size']
+                with open(destination, 'xb') as output:
+                    os.fchmod(output.fileno(), 0o600)
+                    while remaining:
+                        chunk = stream.read(min(262144, remaining))
+                        if not chunk:
+                            raise ValueError('Incomplete input archive')
+                        output.write(chunk)
+                        remaining -= len(chunk)
+            if stream.read(1):
+                raise ValueError('Unexpected input archive payload')
+        verify(stage, {name: manifest[name] for name in names})
+        for name in names:
+            destination = clean_path(seed / name)
+            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.replace(stage / name, destination)
+    archive.unlink()
+
+
 def proc(pid):
     try:
         s = pathlib.Path('/proc', str(pid), 'stat').read_text()
@@ -134,6 +172,8 @@ CACHE_EXCLUDED = {'node_modules', 'cargo-target', 'work', 'jobs'}
 CACHE_ARCHIVE_LIMIT = 256 * 1024 * 1024
 CACHE_EXPANDED_LIMIT = 1024 * 1024 * 1024
 CACHE_SECONDS_LIMIT = 120
+CACHE_VOLUME_PATH = pathlib.Path('/var/reroute-cache')
+MODAL_VOLUME_ROOT = pathlib.Path('/__modal/volumes')
 
 
 def cache_operation(operation, *args):
@@ -159,7 +199,15 @@ def download_path(name):
 def cache_archive(volume, key):
     if not isinstance(key, str) or not re.fullmatch('[a-f0-9]{64}', key):
         raise ValueError('Invalid cache key')
-    return clean_path(pathlib.Path(volume) / (key + '.tgz'))
+    volume = pathlib.Path(volume)
+    if volume == CACHE_VOLUME_PATH and volume.is_symlink():
+        # Only Modal's fixed mount alias is trusted; targets and cache files must remain link-free.
+        clean_path(volume.parent)
+        target = pathlib.Path(os.readlink(volume))
+        if target.parent != MODAL_VOLUME_ROOT or not re.fullmatch('vo-[A-Za-z0-9]+', target.name):
+            raise ValueError('Unexpected cache Volume mount')
+        volume = target
+    return clean_path(volume / (key + '.tgz'))
 
 
 class CacheReader(io.BufferedReader):
@@ -210,7 +258,7 @@ def cache_failure(stage, error):
     return stage + ': ' + detail
 
 
-def restore_cache(cache, volume, key):
+def restore_cache(cache, volume, key, metrics=None):
     archive = cache_archive(volume, key)
     generations = cache_generations(volume, key)
     invalid = False
@@ -226,6 +274,8 @@ def restore_cache(cache, volume, key):
             return False
     if not archive.is_file() or archive.stat().st_size > CACHE_ARCHIVE_LIMIT:
         raise ValueError('Invalid or oversized cache archive')
+    if metrics is not None:
+        metrics['cacheRestoreBytes'] = archive.stat().st_size
     cache = clean_path(cache)
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
     # Stage the entire archive before touching a usable local cache on a corrupt miss.
@@ -274,7 +324,7 @@ def restore_cache(cache, volume, key):
     return True
 
 
-def save_cache(cache, volume, key):
+def save_cache(cache, volume, key, metrics=None):
     stage = 'volume-list'
     published = None
     verified = False
@@ -336,6 +386,8 @@ def save_cache(cache, volume, key):
             if destination.stat().st_size != output.stat().st_size or sha(destination) != digest:
                 raise ValueError('Cache readback mismatch')
             verified = True
+            if metrics is not None:
+                metrics['cacheSaveBytes'] = output.stat().st_size
             stage = 'scratch-cleanup'
         # Only a verified new generation permits retiring old ones; no rename/overwrite on FUSE.
         try:
@@ -393,7 +445,20 @@ def main(action, data):
     work = clean_path(root / 'work')
     work_owner = clean_path(root / 'work-owner')
 
-    metrics = {'cacheHit': False, 'cacheSaved': False, 'cacheRestoreMs': 0, 'cacheSaveMs': 0, 'executionMs': 0}
+    progress_token = data.get('progressToken') if action == 'run' else None
+    if progress_token is not None and (not isinstance(progress_token, str) or not re.fullmatch('[a-f0-9]{32}', progress_token)):
+        raise ValueError('Invalid progress token')
+
+    def phase(stage):
+        if progress_token:
+            try:
+                os.write(2, ('\x1eREROUTE_PROGRESS:' + progress_token + ':' + stage + '\x1f').encode('ascii'))
+            except OSError:
+                pass  # A disconnected progress observer must not interrupt supervision.
+
+    metrics_file = job / 'transfer-metrics.json'
+    metrics = read(metrics_file) if metrics_file.is_file() else {}
+    metrics.update(cacheHit=False, cacheSaved=False, cacheRestoreMs=0, cacheSaveMs=0, cacheRestoreBytes=0, cacheSaveBytes=0, executionMs=0, cleanupMs=0)
     cache_warning = []
     cache = persistent = None
 
@@ -402,6 +467,7 @@ def main(action, data):
             shutil.rmtree(lock)
 
     def finish(status, code):
+        cleanup_started = time.monotonic()
         result = {'status': status, 'code': code, 'scope': 'supervised-descendants', 'finishedAt': time.time()}
         if status != 'unknown' and work.exists():
             if not work_owner.is_file() or work_owner.read_text() != identity:
@@ -411,10 +477,12 @@ def main(action, data):
                 # Archive only this task after descendant termination is confirmed.
                 clean_path(work).rename(job / 'work')
                 work_owner.unlink()
+        metrics['cleanupMs'] += (time.monotonic() - cleanup_started) * 1000
         if status != 'unknown' and persistent:
+            phase('cache-save')
             started = time.monotonic()
             try:
-                warning = cache_operation(save_cache, cache, persistent, key)
+                warning = cache_operation(save_cache, cache, persistent, key, metrics)
                 metrics['cacheSaved'] = True
                 if warning:
                     cache_warning.append(warning)
@@ -496,6 +564,7 @@ def main(action, data):
         manifest[name] = item
     seed = clean_path(root / 'input')
     if action == 'stage':
+        stage_started = time.monotonic()
         existing = entries(seed)
         for name, path in existing.items():
             if name not in manifest:
@@ -508,10 +577,21 @@ def main(action, data):
         for name in manifest:
             (seed / name).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         previous = read(root / 'baseline.json') if (root / 'baseline.json').exists() else {}
-        return {'needed': [name for name, item in manifest.items() if previous.get(name) != item or not (seed / name).is_file()]}
+        needed = [name for name, item in manifest.items() if previous.get(name) != item or not (seed / name).is_file()]
+        write(job / 'needed.json', needed)
+        metrics['remoteStageMs'] = (time.monotonic() - stage_started) * 1000
+        write(metrics_file, metrics)
+        return {'needed': needed, 'metrics': metrics}
     if action == 'seal':
         try:
+            started = time.monotonic()
+            if 'archive' in data:
+                unpack_input(clean_path(job / 'input.gz'), seed, manifest, read(job / 'needed.json'), data['archive'])
+            metrics['remoteUnpackMs'] = (time.monotonic() - started) * 1000
+            started = time.monotonic()
             verify(seed, manifest)
+            metrics['remoteVerifyMs'] = (time.monotonic() - started) * 1000
+            started = time.monotonic()
             write(root / 'baseline.json', manifest)
             if work.exists():
                 raise ValueError('Unresolved execution directory retained; refusing to overwrite it')
@@ -522,7 +602,9 @@ def main(action, data):
             shutil.copytree(seed, work)
             (job / 'outputs').mkdir(mode=0o700)
             (job / 'sealed').touch()
-            return {'sealed': True}
+            metrics['remotePrepareMs'] = (time.monotonic() - started) * 1000
+            write(metrics_file, metrics)
+            return {'sealed': True, 'metrics': metrics}
         except Exception:
             finish('failed', 125)
             raise
@@ -534,7 +616,9 @@ def main(action, data):
         return finish('cancelled', 130)
     if not work_owner.is_file() or work_owner.read_text() != identity:
         raise ValueError('Task does not own the execution directory')
+    started = time.monotonic()
     verify(work, manifest)
+    metrics['remoteVerifyMs'] = metrics.get('remoteVerifyMs', 0) + (time.monotonic() - started) * 1000
     key = request['cacheKey']
     if not re.fullmatch('[a-f0-9]{64}', key):
         raise ValueError('Invalid cache key')
@@ -545,9 +629,10 @@ def main(action, data):
     for directory in ['npm','pnpm','cargo','cargo-target','xdg','pycache','bun']:
         clean_path(cache / directory).mkdir(parents=True, exist_ok=True, mode=0o700)
     if persistent:
+        phase('cache-restore')
         started = time.monotonic()
         try:
-            metrics['cacheHit'] = cache_operation(restore_cache, cache, persistent, key)
+            metrics['cacheHit'] = cache_operation(restore_cache, cache, persistent, key, metrics)
         except Exception as error:
             cache_warning.append('Cache restore failed (miss): ' + cache_failure('restore', error))
         finally:
@@ -578,9 +663,13 @@ def main(action, data):
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
         raise OSError(ctypes.get_errno(), 'Cannot supervise task descendants')
+    supervisor = proc(os.getpid())
+    if supervisor is None:
+        raise ValueError('Cannot verify supervisor process identity')
+    phase('execute')
     execution_started = time.monotonic()
     child = subprocess.Popen(['bash', '-c', command], cwd=workdir, env=env, start_new_session=True)
-    write(job / 'process.json', {'supervisor': os.getpid(), 'start': proc(os.getpid())['start'], 'child': child.pid})
+    write(job / 'process.json', {'supervisor': os.getpid(), 'start': supervisor['start'], 'child': child.pid})
     until = time.monotonic() + timeout
     interrupted = [False]
     def interrupt(signum, frame):
@@ -597,15 +686,17 @@ def main(action, data):
             break
         time.sleep(.05)
     # Reap background and detached descendants before publishing caches or a terminal receipt.
-    confirmed = terminate_group(child.pid)
     metrics['executionMs'] = (time.monotonic() - execution_started) * 1000
+    phase('cleanup')
+    cleanup_started = time.monotonic()
+    confirmed = terminate_group(child.pid)
+    metrics['cleanupMs'] += (time.monotonic() - cleanup_started) * 1000
     if not confirmed:
         return finish('unknown', 125)
     try:
         code = child.wait(timeout=2)
     except subprocess.TimeoutExpired:
         return finish('unknown', 125)
-    metrics['executionMs'] = (time.monotonic() - execution_started) * 1000
     if code < 0:
         code = 128 - code
     return finish(reason or 'exited', 130 if reason == 'cancelled' else 124 if reason == 'timed_out' else code)

@@ -66,7 +66,7 @@ test('Modal snapshot is checkpointed before stopping; reads and destroy never re
 });
 test('Modal native process returns stdout/stderr/exit and rejects stopped execution',async()=>{
  const stream=s=>new ReadableStream({start(c){c.enqueue(Buffer.from(s));c.close()}});let stopped=false;
- const sb={poll:async()=>stopped?0:null,exec:async(argv,opts)=>{assert.deepEqual(argv,['bash','-lc','false']);assert.equal(opts.mode,'binary');return {stdout:stream('out'),stderr:stream('err'),stdin:new WritableStream(),wait:async()=>5}},detach:()=>{}};
+ const sb={poll:async()=>stopped?0:null,exec:async(argv,opts)=>{assert.deepEqual(argv,['bash','-c','false']);assert.equal(opts.mode,'binary');return {stdout:stream('out'),stderr:stream('err'),stdin:new WritableStream(),wait:async()=>5}},detach:()=>{}};
  const sdk={ModalClient:class{sandboxes={fromId:async()=>sb};close(){}}};const p=new ModalProvider({provider:'modal',id:'sb'},async()=>sdk);
  let out='',err='';const r=await p.exec('false',{stdout:b=>out+=b,stderr:b=>err+=b});assert.equal(r.code,5);assert.equal(out,'out');assert.equal(err,'err');
  stopped=true;await assert.rejects(p.exec('false'),/stopped/);

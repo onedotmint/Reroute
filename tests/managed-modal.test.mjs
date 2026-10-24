@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { Readable, Writable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ModalProvider } from '../dist/providers/modal.js';
@@ -91,4 +93,35 @@ test('Modal binary output preserves split UTF-8 and rounds only transport timeou
  const sb={poll:async()=>null,exec:async(_argv,options)=>{assert.equal(options.timeoutMs,2000);return {stdout:stream(),stderr:stream(),stdin:new WritableStream(),wait:async()=>7};},detach:()=>{}};
  const p=new ModalProvider({provider:'modal',id:'sb-text'},async()=>({ModalClient:class{sandboxes={fromId:async()=>sb};close(){}}}));
  const result=await p.exec('false',{timeoutMs:1100});assert.equal(result.stdout,'中文');assert.equal(result.stderr,'中文');assert.equal(result.code,7);
+});
+
+
+test('Modal exec preserves image PATH instead of reading PATH-resetting login profiles', async t => {
+ await fixture(t);
+ const root = await mkdtemp(join(tmpdir(), 'reroute-modal-path-'));
+ t.after(() => rm(root, { recursive: true, force: true }));
+ const imageBin = join(root, 'image-bin'), loginHome = join(root, 'home'), cargoHome = join(root, 'scratch-cargo');
+ for (const dir of [imageBin, loginHome, cargoHome]) await mkdir(dir);
+ await writeFile(join(loginHome, '.bash_profile'), 'PATH=/usr/bin:/bin\nexport PATH\n');
+ await writeFile(join(imageBin, 'rustc'), '#!/bin/sh\nprintf "IMAGE_RUST_OK:%s\\n" "$CARGO_HOME"\n', { mode: 0o700 });
+ const sb = {
+  poll: async () => null, detach() {},
+  exec: async (argv, options) => {
+   assert.equal(options.mode, 'binary');
+   const child = spawn(argv[0], argv.slice(1), {
+    env: { HOME: loginHome, PATH: imageBin + ':/usr/bin:/bin', CARGO_HOME: cargoHome },
+    stdio: ['pipe', 'pipe', 'pipe'],
+   });
+   const done = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => resolve(code)); });
+   return { stdin: Writable.toWeb(child.stdin), stdout: Readable.toWeb(child.stdout), stderr: Readable.toWeb(child.stderr), wait: () => done };
+  },
+ };
+ const p = new ModalProvider({ provider: 'modal', id: 'sb-path' }, async () => ({ ModalClient: class {
+  sandboxes = { fromId: async () => sb }; close() {}
+ } }));
+ t.after(() => p.close());
+ const result = await p.exec('rustc');
+ assert.equal(result.code, 0, result.stderr);
+ assert.equal(result.stdout, 'IMAGE_RUST_OK:' + cargoHome + '\n');
+ assert.equal(result.stderr, '');
 });

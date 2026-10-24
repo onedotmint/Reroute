@@ -6,12 +6,13 @@ import { inside, processExec } from './util.js';
 import { PROVIDERS, type Config, type Profile, type ProviderId, type Category } from './types.js';
 import { cloudSummary, presets } from './resources.js';
 import { TOOLCHAIN_IMAGE } from './toolchain.js';
-import { defaults, hasLegacy, loadConfig, saveConfig, validate } from './config.js';
+import { defaults, hasLegacy, loadConfig, loadUserConfig, projectRoot, saveConfig, saveUserConfig, userConfigPath, validate } from './config.js';
 import { credentialStatus, saveProviderSecrets, secretFile, secretNames, type SecretMap } from './auth.js';
 import { discoverExisting } from './discovery.js';
 import { doctor } from './doctor.js';
 export interface SetupOptions {
   advanced?: boolean;
+  project?: boolean;
   nonInteractive?: boolean; provider?: string; id?: string; name?: string; root?: string;
   port?: string; identity?: string; app?: string; tasks?: string; noPi?: boolean; ignoreLegacy?: boolean;
   managed?: boolean; credential?: string; image?: string; cpu?: string; memory?: string; preset?: string;
@@ -66,7 +67,7 @@ function managedProfile(profile: Partial<Profile>, options: SetupOptions): Parti
 async function managedPrompts(profile: Partial<Profile>, options: SetupOptions): Promise<Partial<Profile>> {
   const modal = profile.provider === 'modal', unit = modal ? 'physical cores (not vCPU)' : 'vCPU';
   p.note(billingWarning + (modal
-    ? '\nModal managed is experimental; live acceptance is not established. Non-preemptible Sandbox rates below, NOT cheaper function rates.\nhttps://modal.com/pricing — CPU $0.00003942/core/sec × 3600; memory $0.00000667/GiB/sec × 3600.'
+    ? '\nModal execution and starter toolchain verified against the real service; broad recovery and billing unverified. Non-preemptible Sandbox rates below, NOT cheaper function rates.\nhttps://modal.com/pricing — CPU $0.00003942/core/sec × 3600; memory $0.00000667/GiB/sec × 3600.'
     : '\nhttps://www.daytona.io/pricing/ — public rates fetched 2026-10-21: vCPU $0.0504/h, memory $0.0162/GiB/h.') +
     '\nReview rates against your provider/account; offered defaults are not a billing guarantee.', 'Managed compute and billing');
   const sizing = answer(await p.select({message:'Compute specification', initialValue:options.preset ?? (profile.compute ? 'custom' : 'small'),
@@ -92,13 +93,16 @@ async function managedPrompts(profile: Partial<Profile>, options: SetupOptions):
 }
 
 export async function setup(cwd: string, options: SetupOptions = {}): Promise<Config> {
-  const {root, config: existing} = await loadConfig(cwd);
+  const root = await projectRoot(cwd);
+  const existing = options.project ? (await loadConfig(root)).config : await loadUserConfig();
+  const persist = (candidate: Config) => options.project ? saveConfig(root, candidate) : saveUserConfig(candidate);
+  const destination = options.project ? join(root, '.reroute.json') : userConfigPath();
   if (await hasLegacy(root) && !options.ignoreLegacy)
     throw new Error('Legacy Reroute state detected and retained. Recover pending files using the old version first. --ignore-legacy starts an isolated v3 config; it does not migrate, erase, or recover old state.');
   const config = existing ?? defaults();
-  if (!options.nonInteractive && !options.advanced && !Object.entries(options).some(([key,value]) => !['noPi','ignoreLegacy','nonInteractive','advanced'].includes(key) && value !== undefined)) {
+  if (!options.nonInteractive && !options.advanced && !Object.entries(options).some(([key,value]) => !['noPi','ignoreLegacy','nonInteractive','advanced','project'].includes(key) && value !== undefined)) {
     if (!process.stdin.isTTY) throw new Error('No interactive terminal. Use setup --non-interactive --provider ssh --id user@host');
-    return quickSetup(root, config);
+    return quickSetup(root, config, options.project === true);
   }
   let name = options.name ?? (config.active || 'default');
   let profile: Partial<Profile> = {...config.profiles[name]};
@@ -132,7 +136,7 @@ export async function setup(cwd: string, options: SetupOptions = {}): Promise<Co
         {value:'managed',label:'Reroute-managed compute (create on authorized tasks)'},
       ]})) === 'managed';
     if (!managed) { delete profile.managed; delete profile.compute; delete profile.owner; delete profile.cacheVolume; }
-    p.note(guides[picked] + (picked === 'ssh' ? '' : '\nEXPERIMENTAL: this provider has offline contract coverage, but no live account acceptance yet.') +
+    p.note(guides[picked] + (['daytona','modal'].includes(picked) ? '\nReal-service execution verified; billing and broad failure recovery remain unverified.' : '') +
       (managed ? '\nSetup only saves local configuration; no cloud query, creation or start.' : '\nOnly existing compute is listed; nothing is created or resumed.'), 'Provider setup');
     if (secretNames[picked].length) {
       const credential = answer(await p.text({message:'Credential account name (blank uses original default)', initialValue:options.credential ?? profile.credential ?? '',
@@ -198,9 +202,9 @@ export async function setup(cwd: string, options: SetupOptions = {}): Promise<Co
       '\nInput flows only from local to remote; no source writeback.\nNo paid compute will be created or resumed during setup.', 'Review');
     if (profile.managed) profile.managed.authorized = answer(await p.confirm({
       message:'Authorize automatic paid creation/start on future tasks? (No saves unauthorized)',initialValue:false}));
-    if (!answer(await p.confirm({message:'Save this project configuration?',initialValue:true})))
+    if (!answer(await p.confirm({message:options.project ? 'Save this project configuration?' : 'Save user defaults for all projects? (Each project still needs remote execution consent)',initialValue:true})))
       throw new Error('Setup cancelled; no configuration saved');
-    if (!managed) testConnection = answer(await p.confirm({message:'After saving, check connection to this existing resource? (no provisioning/resume)',initialValue:false}));
+    if (!managed && options.project) testConnection = answer(await p.confirm({message:'After saving, check connection to this existing resource? (no provisioning/resume)',initialValue:false}));
   }
   const previous = config.profiles[name];
   if (previous?.id !== profile.id) { delete profile.pendingResume; delete profile.snapshot; }
@@ -215,9 +219,8 @@ export async function setup(cwd: string, options: SetupOptions = {}): Promise<Co
     if (inside(sourceRoot, resolve(secretFile(profile.credential)))) throw new Error('Private credential storage must be outside this project/repository; configure XDG_CONFIG_HOME outside it. No keys saved.');
     await saveProviderSecrets(profile.provider!, pending, profile.credential);
   }
-  await saveConfig(root,candidate);
-  // Pi package installation is always managed by Pi itself (pi install -l, pi remove -l).
-  // Setup touches project configuration only; never writes Pi extension entries or settings.
+  await persist(candidate);
+  // Pi owns extension installation. Defaults never grant project source-upload or execution consent.
   if (!options.nonInteractive) {
     if (testConnection) {
       const spin = p.spinner(); spin.start('Checking existing resource (no resume)');
@@ -227,15 +230,15 @@ export async function setup(cwd: string, options: SetupOptions = {}): Promise<Co
         p.note('Resource: '+String(result.checks.resource ?? 'unavailable')+'\n'+(result.ok ? 'Remote prerequisites verified' : 'Check reroute doctor --connect for diagnostics.'),'Connection');
       } catch { spin.stop('Connection could not be confirmed; see reroute doctor --connect'); }
     }
-    p.outro('Saved '+join(root,'.reroute.json')+
-      '\nPi extension installation is managed separately by Pi (pi install -l ...).'+
+    p.outro('Saved '+destination+
+      '\nPi extension installation is managed separately by Pi (pi install ...). Each project needs one-time remote execution consent.'+
       '\nOpen Pi or run /reload, then /reroute. Add another provider by rerunning reroute setup.');
   }
   return candidate;
 }
 
 /** First-run path: collect locally, review once, then persist; advanced edits keep their existing path. */
-async function quickSetup(root: string, config: Config): Promise<Config> {
+async function quickSetup(root: string, config: Config, project: boolean): Promise<Config> {
   p.intro('Reroute | Configure once, use from Pi');
   const picked = answer(await p.multiselect({ message: 'Choose providers — Space toggles, ↑/↓ moves, Enter confirms (multiple allowed)',
     initialValues: ['daytona'], required: true, options: [
@@ -246,7 +249,7 @@ async function quickSetup(root: string, config: Config): Promise<Config> {
     ] }));
   if (picked.includes('advanced')) {
     p.note('Advanced setup configures one profile at a time. Quick selections have not been saved.', 'Advanced configuration');
-    return setup(root, { advanced: true, ignoreLegacy: true });
+    return setup(root, { advanced: true, project, ignoreLegacy: true });
   }
   const candidate: Config = { ...config, profiles: { ...config.profiles } };
   const pending: { provider: ProviderId; credential: string; values: SecretMap }[] = [];
@@ -296,7 +299,7 @@ async function quickSetup(root: string, config: Config): Promise<Config> {
   }
   const cloud = added.filter(name => candidate.profiles[name]!.managed);
   if (cloud.length) {
-    p.note('Small: 1 CPU / 2 GiB; Node 22 + Rust + Python starter image (cloud build LIVE UNVERIFIED).\n$3/month estimate limit PER credential account, $0.50/task, 5-minute idle allowance; multiple accounts have separate budgets.\nCPU/memory ceilings: 8 / 16 GiB; storage reservation $0.01/task.\n' + billingWarning, 'Recommended settings');
+    p.note('Small: 1 CPU / 2 GiB; Node 22 + Rust + Python starter image. First build can take time.\n$3/month estimate limit PER credential account, $0.50/task, 5-minute idle allowance; multiple accounts have separate budgets.\nCPU/memory ceilings: 8 / 16 GiB; storage reservation $0.01/task.\n' + billingWarning, 'Recommended settings');
     const settings = answer(await p.select({ message: 'Compute & budget', options: [
       { value: 'defaults', label: 'Use recommended settings', hint: 'Review rates and authorization next' },
       { value: 'custom', label: 'Customize specifications, image, budget or rates' },
@@ -313,7 +316,7 @@ async function quickSetup(root: string, config: Config): Promise<Config> {
         '\n  Estimate budget $' + policy.monthlyUsd + '/month per account, $' + policy.maxTaskUsd + '/task; CPU $' + policy.cpuHourUsd + '/hour, memory $' + policy.memoryGiBHourUsd + '/GiB-hour' +
         '\n  Rates: ' + (modal ? 'https://modal.com/pricing (non-preemptible Sandbox rates)' : 'https://www.daytona.io/pricing/') +
         '\n  ' + (modal ? 'Compute released after confirmed tasks; Volume retained.' : 'Owned compute reused; guarded idle stop; Volume retained.');
-    }).join('\n') + '\n' + billingWarning + '\nProvider quota and rates are not verified; check the official account before authorizing.', 'Review rates & costs — LIVE UNVERIFIED');
+    }).join('\n') + '\n' + billingWarning + '\nProvider quota and rates are not verified; check the official account before authorizing.', 'Review rates & costs — actual billing unverified');
     const ready: string[] = [];
     for (const name of cloud) {
       const profile = candidate.profiles[name]!;
@@ -324,7 +327,7 @@ async function quickSetup(root: string, config: Config): Promise<Config> {
   }
   validate(candidate);
   p.note('Default: ' + candidate.active + '\nProfiles: ' + Object.keys(candidate.profiles).join(', ') + '\nExisting profiles retained. No cloud requests, creation or start during this setup.', 'Save configuration');
-  if (!answer(await p.confirm({ message: 'Save these project profiles and private credentials?', initialValue: true }))) throw new Error('Setup cancelled; nothing saved');
+  if (!answer(await p.confirm({ message: project ? 'Save these project profiles and private credentials?' : 'Save these user defaults and private credentials? (Project consent is separate)', initialValue: true }))) throw new Error('Setup cancelled; nothing saved');
   // Validate all destinations before writing any credential; cancellation above leaves no partial setup.
   if (pending.length) {
     const git = await processExec('git', ['-C', root, 'rev-parse', '--show-toplevel']).catch(() => undefined);
@@ -332,7 +335,9 @@ async function quickSetup(root: string, config: Config): Promise<Config> {
     for (const item of pending) if (inside(sourceRoot, resolve(secretFile(item.credential)))) throw new Error('Private credential storage must be outside this project/repository. No keys saved.');
     for (const item of pending) await saveProviderSecrets(item.provider, item.values, item.credential);
   }
-  await saveConfig(root, candidate);
-  p.outro('Saved. Open Pi → /reroute. AI uses Reroute for heavy tasks; AFT keeps ordinary Bash.\nRun setup --advanced for account edits, existing targets or extra options. Credentials were not verified online.');
+  if (project) await saveConfig(root, candidate); else await saveUserConfig(candidate);
+  p.outro('Saved ' + (project ? join(root, '.reroute.json') : userConfigPath()) + '. Open Pi → /reroute.\nCredentials saved/detected, NOT verified online. Spending policy: ' +
+    (candidate.profiles[candidate.active]!.managed?.authorized ? 'authorized within reviewed estimates' : 'not authorized for managed creation/start') +
+    '. Each project still requires one-time consent before source upload or paid execution.\nAI chooses heavy tasks; AFT keeps ordinary Bash. First-task success is reported after a real task, not after setup.');
   return candidate;
 }

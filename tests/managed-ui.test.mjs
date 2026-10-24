@@ -1,11 +1,16 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createRerouteTool, panel } from '../dist/pi.js';
-import { defaults, loadConfig, saveConfig } from '../dist/config.js';
+import { defaults, loadConfig, saveConfig, authorizeProject } from '../dist/config.js';
+
+const isolated=await mkdtemp(join(tmpdir(),'reroute-managed-ui-isolation-'));
+process.env.XDG_CONFIG_HOME=join(isolated,'config');
+process.env.REROUTE_STATE_DIR=join(isolated,'state');
+after(()=>rm(isolated,{recursive:true,force:true}));
 
 const profile = () => ({provider:'daytona',id:'auto',image:'reviewed-toolchain:1',credential:'gift-account',compute:{cpu:2,memoryGiB:4},
  managed:{authorized:false,maxCpu:8,maxMemoryGiB:16,maxTaskUsd:0.5,monthlyUsd:3,cpuHourUsd:0.0504,memoryGiBHourUsd:0.0162,storageMonthUsd:0.01,idleMinutes:5}});
@@ -17,7 +22,7 @@ async function project(t) {
 test('CLI managed setup and plan work without an ID, credentials or cloud calls; unauthorized execution fails closed',async t=>{
  const {base,root}=await project(t), state=join(base,'state');
  const cli=(...args)=>spawnSync(process.execPath,[resolve('bin/reroute.mjs'),'--cwd',root,...args],{encoding:'utf8',env:{...process.env,REROUTE_STATE_DIR:state,XDG_CONFIG_HOME:join(base,'private'),DAYTONA_API_KEY:'fixture-not-for-output'}});
- const setup=cli('setup','--non-interactive','--managed','--provider','daytona','--credential','gift-account','--image','reviewed-toolchain:1','--preset','medium','--max-cpu','8','--max-memory','16','--cpu-hour-usd','0.0504','--memory-hour-usd','0.0162');
+ const setup=cli('setup','--project','--non-interactive','--managed','--provider','daytona','--credential','gift-account','--image','reviewed-toolchain:1','--preset','medium','--max-cpu','8','--max-memory','16','--cpu-hour-usd','0.0504','--memory-hour-usd','0.0162');
  assert.equal(setup.status,0,setup.stderr);
  assert.equal((await loadConfig(root)).config.profiles.default.id,'auto');
  assert.ok(!(await readFile(join(root,'.reroute.json'),'utf8')).includes('fixture-not-for-output'));
@@ -31,7 +36,7 @@ test('CLI managed setup and plan work without an ID, credentials or cloud calls;
  assert.equal(cli('plan','--preset','typo','--','cargo','test').status,125);
 });
 test('Pi passes user sizing overrides without changing defaults or Bash ownership',async t=>{
- const {root,config}=await project(t);await saveConfig(root,config);
+ const {root,config}=await project(t);await saveConfig(root,config);await authorizeProject(root,config);
  let calls=0;
  const tool=createRerouteTool(async(_command,opts)=>{
   calls++;assert.deepEqual(opts.compute,{cpu:4,memoryGiB:8});
@@ -59,7 +64,7 @@ test('Pi managed onboarding uses one non-secret settings editor and explicit aut
 });
 test('compute settings cannot smuggle an API key into project configuration',async t=>{
  const {root,config}=await project(t);await saveConfig(root,config);
- const menus=['Compute & budget','Close'],notices=[];
+ const menus=['Project overrides','Compute & budget','Close'],notices=[];
  await panel({cwd:root,hasUI:true,ui:{select:async()=>menus.shift(),notify:s=>notices.push(s),editor:async()=>JSON.stringify({apiKey:'not-a-real-key'}),confirm:async()=>{throw Error('must not confirm invalid settings');}}});
  assert.match(notices.join(' '),/non-secret/);
  assert.ok(!(await readFile(join(root,'.reroute.json'),'utf8')).includes('not-a-real-key'));

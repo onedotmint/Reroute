@@ -3,15 +3,16 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, copyFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaults } from '../dist/config.js';
+import { defaults, authorizeProject } from '../dist/config.js';
 import { runRemote, inspectJob } from '../dist/engine.js';
 import { processExec } from '../dist/util.js';
 
 // Offline real-process fixture, not proof of OS/container isolation or live cloud permissions.
 async function fixture(t) {
- const base=await mkdtemp(join(tmpdir(),'reroute-security-')),old=process.env.REROUTE_STATE_DIR;
- process.env.REROUTE_STATE_DIR=join(base,'state');
- t.after(async()=>{if(old===undefined)delete process.env.REROUTE_STATE_DIR;else process.env.REROUTE_STATE_DIR=old;await rm(base,{recursive:true,force:true});});
+ const base=await mkdtemp(join(tmpdir(),'reroute-security-'));
+ const previous={XDG_CONFIG_HOME:process.env.XDG_CONFIG_HOME,REROUTE_STATE_DIR:process.env.REROUTE_STATE_DIR};
+ process.env.XDG_CONFIG_HOME=join(base,'config');process.env.REROUTE_STATE_DIR=join(base,'state');
+ t.after(async()=>{for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}await rm(base,{recursive:true,force:true});});
  const home=join(base,'remote-home');await mkdir(home);
  const profile={provider:'ssh',id:'offline',root:join(base,'remote')};
  const config={...defaults(),active:'security',profiles:{security:profile}};
@@ -19,6 +20,7 @@ async function fixture(t) {
  const env={PATH:process.env.PATH,HOME:home,LANG:'C.UTF-8'};
  const provider={profile,stdin:true,status:async()=> 'running',exec:(command,options)=>processExec('bash',['-c',command],{...options,env}),put:copyFile,get:copyFile};
  const a=join(base,'a'),b=join(base,'b');await mkdir(a);await mkdir(b);
+ await authorizeProject(a,config);await authorizeProject(b,config);
  return {a,b,config,provider,run:(root,command,options={})=>runRemote(command,{root,cwd:root,config,provider,...options})};
 }
 
@@ -62,9 +64,9 @@ test('attached projects sharing a remote UID are explicitly not an adversarial f
 });
 
 test('Daytona authenticates only its local client; command payload has no management token or env forwarding',async t=>{
- const f=await fixture(t),oldKey=process.env.DAYTONA_API_KEY,oldConfig=process.env.XDG_CONFIG_HOME;
- process.env.DAYTONA_API_KEY='FAKE_DAYTONA_CONTROL_PLANE_KEY';process.env.XDG_CONFIG_HOME=join(f.a,'private-config');
- t.after(()=>{if(oldKey===undefined)delete process.env.DAYTONA_API_KEY;else process.env.DAYTONA_API_KEY=oldKey;if(oldConfig===undefined)delete process.env.XDG_CONFIG_HOME;else process.env.XDG_CONFIG_HOME=oldConfig;});
+ await fixture(t);const oldKey=process.env.DAYTONA_API_KEY;
+ process.env.DAYTONA_API_KEY='FAKE_DAYTONA_CONTROL_PLANE_KEY';
+ t.after(()=>{if(oldKey===undefined)delete process.env.DAYTONA_API_KEY;else process.env.DAYTONA_API_KEY=oldKey;});
  const {DaytonaProvider}=await import('../dist/providers/daytona.js');let authenticated=false,payload;
  const sb={state:'started',process:{createSession:async()=>{},deleteSession:async()=>{},executeSessionCommand:async(_session,request)=>{payload=request;return {exitCode:0,stdout:'ok',stderr:''};}}};
  const sdk={Daytona:class{constructor(options){authenticated=options.apiKey===process.env.DAYTONA_API_KEY;}async get(){return sb;}}};
@@ -75,8 +77,7 @@ test('Daytona authenticates only its local client; command payload has no manage
 });
 
 test('a first managed Daytona allocation creates its absent Volume once; lost acknowledgement never creates compute',async t=>{
- const f=await fixture(t),oldConfig=process.env.XDG_CONFIG_HOME;process.env.XDG_CONFIG_HOME=join(f.a,'private-config');
- t.after(()=>{if(oldConfig===undefined)delete process.env.XDG_CONFIG_HOME;else process.env.XDG_CONFIG_HOME=oldConfig;});
+ await fixture(t);
  const {DaytonaProvider}=await import('../dist/providers/daytona.js');
  const profile={provider:'daytona',id:'auto',image:'fixture:1',compute:{cpu:2,memoryGiB:4},managed:{authorized:true}};
  for(const lost of [false,true]){

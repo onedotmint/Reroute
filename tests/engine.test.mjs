@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, copyFile, symlink } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
-import { defaults, getJob, saveConfig } from '../dist/config.js';
+import { defaults, getJob, saveConfig, authorizeProject } from '../dist/config.js';
 import { runRemote } from '../dist/engine.js';
 import { createRerouteTool } from '../dist/pi.js';
 import { processExec } from '../dist/util.js';
@@ -12,9 +12,14 @@ import { processExec } from '../dist/util.js';
 async function fixture(t) {
   const base = await mkdtemp(join(tmpdir(), 'reroute-component-'));
   const root = join(base,'project'); await mkdir(root); await writeFile(join(root,'file.txt'),'local\n');
-  process.env.REROUTE_STATE_DIR = join(base,'state');
-  t.after(() => rm(base,{recursive:true,force:true}));
+  const previous = {XDG_CONFIG_HOME:process.env.XDG_CONFIG_HOME, REROUTE_STATE_DIR:process.env.REROUTE_STATE_DIR};
+  process.env.XDG_CONFIG_HOME = join(base,'config'); process.env.REROUTE_STATE_DIR = join(base,'state');
+  t.after(async () => {
+    for (const [key,value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    await rm(base,{recursive:true,force:true});
+  });
   const config = {...defaults(),active:'fixture',profiles:{fixture:{provider:'ssh',id:'fixture',root:join(base,'remote')}}};
+  await authorizeProject(root,config);
   const provider = {profile:config.profiles.fixture,stdin:true,status:async()=> 'running',exec:(command,opts)=>processExec('bash',['-c',command],opts),put:copyFile,get:copyFile,lifecycle:async()=>{throw Error('fixture only')}};
   return {root,config,provider, run:(command,extra={})=>runRemote(command,{root,cwd:root,config,provider,...extra})};
 }
@@ -48,8 +53,8 @@ test('failed upload never starts execution and retains an uncertain lock rather 
   await assert.rejects(readFile(join(f.root,'SHOULD_NOT_RUN')),{code:'ENOENT'});
 });
 test('post-transfer corruption is refused before executing any command',async t=>{
-  const f=await fixture(t); f.provider.put=async(a,b)=>{await copyFile(a,b); if(b.endsWith('/input/file.txt')) await writeFile(b,'corrupted')};
-  await assert.rejects(f.run('echo BAD'),/Input checksum mismatch/);
+  const f=await fixture(t); f.provider.put=async(a,b)=>{await copyFile(a,b); if(b.endsWith('/input.gz')) await writeFile(b,'corrupted')};
+  await assert.rejects(f.run('echo BAD'),/Input archive checksum mismatch/);
 });
 
 test('execution receipts cannot overwrite local job ownership and measured cache fields merge with transfer metrics',async t=>{
@@ -125,6 +130,7 @@ test('home-relative SSH identities remain excluded when configured through the P
  t.after(()=>{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;});
  const key=join(f.root,'deployment-identity');await writeFile(key,'FAKE_HOME_IDENTITY');
  f.config.profiles.fixture.identityFile='~/deployment-identity';
+ await authorizeProject(f.root,f.config); // Changing authentication identity needs fresh consent.
  const result=await f.run('test ! -e deployment-identity; cat file.txt');
  assert.equal(result.code,0);assert.equal(result.stdout,'local\n');assert.equal(await readFile(key,'utf8'),'FAKE_HOME_IDENTITY');
 });

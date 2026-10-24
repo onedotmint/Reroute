@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { spawnSync } from 'node:child_process';
-import { defaults, saveConfig, getJob, saveJob } from '../dist/config.js';
+import { defaults, saveConfig, getJob, saveJob, authorizeProject } from '../dist/config.js';
 import { runRemote, downloadArtifact, inspectJob, helperCommand } from '../dist/engine.js';
 import { SshProvider } from '../dist/providers/ssh.js';
 import { createRerouteTool, createRerouteStatusTool } from '../dist/pi.js';
@@ -16,10 +16,12 @@ if(!env.REROUTE_TEST_SSH_ID||!env.REROUTE_TEST_SSH_PORT||!env.REROUTE_TEST_SSH_K
 const evidence={kind:'real OpenSSH/rsync over localhost; NOT cross-machine/WSL acceptance',node:process.version,checks:[],measurements:{}};
 const mark=name=>evidence.checks.push(name);
 const base=await mkdtemp(join(tmpdir(),'reroute-ssh-client-')), root=join(base,'project');await mkdir(root);
-process.env.REROUTE_STATE_DIR=join(base,'receipts');
+const previous={XDG_CONFIG_HOME:process.env.XDG_CONFIG_HOME,REROUTE_STATE_DIR:process.env.REROUTE_STATE_DIR};
+process.env.XDG_CONFIG_HOME=join(base,'config');process.env.REROUTE_STATE_DIR=join(base,'receipts');
 const remoteRoot='/tmp/reroute-ssh-acceptance-'+randomUUID();
 const profile={provider:'ssh',id:env.REROUTE_TEST_SSH_ID,port:Number(env.REROUTE_TEST_SSH_PORT),identityFile:env.REROUTE_TEST_SSH_KEY,root:remoteRoot};
 const config={...defaults(),active:'ssh-test',profiles:{'ssh-test':profile}};const provider=new SshProvider(profile);
+await authorizeProject(root,config);
 const run=(command,extra={})=>runRemote(command,{cwd:root,root,config,...extra});
 const git=(...args)=>{const r=spawnSync('git',['-C',root,...args],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);};
 let first,second;
@@ -114,4 +116,5 @@ await test('real SSH: native lockfile bootstrap and Cargo compiler cache measure
 });
 // Cleanup is limited to this uniquely named fixture, never a user resource.
 await provider.exec(shell(['rm','-rf','--',remoteRoot]));await rm(base,{recursive:true,force:true});
+for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
 await mkdir('.artifacts',{recursive:true});await writeFile('.artifacts/ssh-verification.json',JSON.stringify(evidence,null,2)+'\n');

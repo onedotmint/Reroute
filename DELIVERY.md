@@ -1,8 +1,10 @@
-# Reroute 0.3 delivery ledger
+# Reroute delivery ledger — 0.4.0 release
+
+**Current acceptance:** the frozen working-tree candidate passed both providers' four-scenario real-cloud rechecks, native global installation/consent checks and the six model-selection categories. Earlier harness failures and explicitly authorized rechecks are retained, not relabelled. Exact artifact identity, measurements, remaining empty Modal Apps and release gates are in [Release acceptance](docs/RELEASE-ACCEPTANCE.md). Earlier sections below are historical checkpoints, not claims about every later working tree.
 
 **Canonical source:** [rebuild/0.3-native](https://github.com/onedotmint/Reroute/tree/rebuild/0.3-native); main and the original 0.2 branch are unchanged. The precise final commit SHA is recorded in each successful CI archive's `COMMIT.txt` / `package-verification.json`, and in the GitHub run's head SHA. Always match those values to the requested source ref. This versioned ledger does not falsely describe an older checkpoint as the final SHA.
 
-**Build:** npm package `@onedotmint/reroute@0.3.0`, `npm pack` to `onedotmint-reroute-0.3.0.tgz`. CI runs locked `npm ci`, strict types/build, tests, real localhost SSH, benchmark, real pack + clean-prefix install/smoke, then uploads the tarball and evidence as `reroute-npm-node-<node>-<sha>`, retention 30 days. CI does not run npm publish or create a GitHub Release; public availability is recorded by the [npm registry](https://www.npmjs.com/package/@onedotmint/reroute) and [GitHub Releases](https://github.com/onedotmint/Reroute/releases).
+**Build:** npm package `@onedotmint/reroute@0.4.0`, `npm pack` to `onedotmint-reroute-0.4.0.tgz`. CI runs locked `npm ci`, strict types/build, tests, real localhost SSH, benchmark, real pack + clean-prefix install/smoke, then uploads the tarball and evidence as `reroute-npm-node-<node>-<sha>`, retention 30 days. CI does not run npm publish or create a GitHub Release; public availability is recorded by the [npm registry](https://www.npmjs.com/package/@onedotmint/reroute) and [GitHub Releases](https://github.com/onedotmint/Reroute/releases).
 
 **Architecture removal (0.2 → 0.3):** removed resident daemon, generic multi-way synchronization and source writeback, merge conflict states, remote dev server/preview, unrelated adapters and legacy protocol. Retained native Pi integration (now an independent compute tool, not a Bash interface), Clack setup, conservative command classification, direct compute providers; rebuilt one-way snapshots and a small task supervisor. Uses OpenSSH, rsync, official Daytona/Modal/E2B SDKs, SkyPilot CLI, Pi SDK and TypeScript; no LLM client.
 
@@ -15,7 +17,7 @@
 | Publication | Check the [npm registry](https://www.npmjs.com/package/@onedotmint/reroute) and [GitHub Releases](https://github.com/onedotmint/Reroute/releases); CI artifacts alone are not publication |
 | Tests | **198 passed / 0 failed / 0 skipped**, plus real localhost SSH/rsync **7/7** and offline smoke with `cloudCalls: 0` |
 | Daytona | **Live-verified**, including a full run on the exact merged commit `f713f52` |
-| Modal | **Never run against the real service.** Offline tests only |
+| Modal | Lightweight live execution/release and synthetic download-cache persistence passed; full acceptance pending |
 | SSH / SkyPilot | SSH has real localhost evidence; SkyPilot is offline-tested only |
 | E2B | Offline-tested, with a known `UNRESOLVED` auto-resume race |
 | Billing | **Unverified for every provider.** No artifact records an actual charge |
@@ -44,7 +46,7 @@ Everything below this table is history, newest last. It records what was true at
 - Slimmed the Pi profile-management flow rather than adding another configuration service. Shared `validate`/`saveConfig` remain the sole configuration validation/persistence path; both Clack onboarding and Pi use the same project configuration. The masked credential wizard is kept separate because Pi text inputs are not masked.
 - Main `/reroute` menu now contains everyday overview, providers, routing mode, connection check and jobs; lifecycle stop/resume/destroy and key removal moved to **Advanced**. No resource is accessed merely by opening a menu; each potentially costly/destructive action still requires consent.
 - Canceled Pi field editing leaves the existing saved profile untouched; new tests cover cancel, provider switching and Advanced confirmation.
-- Cloud provider expansion frozen. **Daytona has since been verified live** (see the live-acceptance section below); SkyPilot/Modal/E2B remain **experimental and LIVE UNVERIFIED**, not removed or silently disabled.
+- Cloud provider expansion frozen. **Daytona has since been verified live** (see the live-acceptance section below); SkyPilot/E2B remain **experimental and LIVE UNVERIFIED**; Modal has since passed the lightweight checks recorded below, not full acceptance. None is removed or silently disabled.
 - The existing clean-prefix npm package check now records `installMs` and `nodeModulesKiB` in `package-verification.json`, providing a measured baseline instead of guessing WSL2 disk usage. Timing includes CI environment effects and is not a performance promise.
 
 ## Verified versus unverified
@@ -59,7 +61,7 @@ Everything below this table is history, newest last. It records what was true at
 | Performance | Synthetic 128 × 64 KiB preparation measurement and localhost SSH test timings saved as JSON in CI artifact; **no proof of real-device CPU/RAM savings or remote speedup** |
 | Daytona | **LIVE VERIFIED** on a real account, including one run on the exact merged commit `f713f52`: image build, cache save then hit, failure and retest, canonical identity exclusion, detached-descendant cleanup. Evidence in `.artifacts/live-clean-commit-acceptance.json` |
 | SkyPilot | Implemented, offline contract-tested; **LIVE UNVERIFIED** |
-| Modal | Implemented, offline contract-tested; **LIVE UNVERIFIED** — never run against the real service, no artifact exists |
+| Modal | Lightweight live execution/release and synthetic archive-cache persistence passed; starter image, real package builds and full failure acceptance pending |
 | E2B | Implemented, offline contract-tested; **LIVE UNVERIFIED**, and carries a known `UNRESOLVED` auto-resume race |
 | Cross-machine WSL2 / real network interruption / account billing behavior | **NOT VERIFIED** |
 
@@ -164,14 +166,14 @@ Not verified in this round: the real-model natural-selection path (`reroute_run`
 
 #### Still not verified
 
-- **Modal live execution: never performed.** There is no Modal artifact; Modal support rests on offline SDK-shaped tests and fixtures only.
+- **Modal lightweight live checks have since passed.** See the follow-up section below; this does not certify the starter image, real package builds, failure recovery or billing.
 - **Starter toolchain image cloud build: not verified.** `src/toolchain.ts` is exercised offline only; no cloud build of that recipe exists.
 - **Billing: not verified.** Every artifact records `actualBilledUsd: null`. The only spending observation is a rounded cumulative dashboard figure (`0.01 USD`) explicitly marked as not this run's incremental charge. No official balance/credit API was used.
 - **Current-commit cloud state: unverified.** No live run has been made against `b8fdfe5` or any commit on this branch, and the live runs above predate the two hardening fixes. The identity-path and process-ownership fixes change snapshot exclusion and remote cleanup — exactly the code those runs exercised — so their live behavior is inferred from offline tests, not from a cloud run.
 - Provider quota acceptance, Volume durability across sandbox lifetimes, native guards after a killed client, manual WSL2 Pi/TUI acceptance. Localhost OpenSSH is now covered by CI (7/7), not by this machine.
 - **E2B remains `UNRESOLVED`** (`.artifacts/security-e2b-race-result.json`): an offline SDK-shape probe found its `getInfo`/`connect` interleaving permits the documented auto-resume. Not fixed here; out of this change's scope and left as a recorded open contract gap.
 
-**Merged, not released.** PR #2 was merged into `rebuild/0.3-native` as merge commit `2382dc5` (2026-10-22T06:19:55Z); the version remains a development candidate, not a published daily-use certification. No npm publish, GitHub Release or git tag was created. Daytona live acceptance was performed repeatedly, including once on the exact merged commit; **Modal live acceptance has never been performed.**
+**Merged, not released.** PR #2 was merged into `rebuild/0.3-native` as merge commit `2382dc5` (2026-10-22T06:19:55Z); the version remains a development candidate, not a published daily-use certification. No npm publish, GitHub Release or git tag was created. Daytona live acceptance was performed repeatedly, including once on the exact merged commit; **Modal has since passed lightweight live execution/release and synthetic cache-persistence checks, not full live acceptance.**
 
 Verified on commit `65a0253` (the PR head at merge) by CI runs [39732180527](https://github.com/onedotmint/Reroute/actions/runs/39732180527) and [39732187119](https://github.com/onedotmint/Reroute/actions/runs/39732187119): Node 22 and 24 both passed, **198 passed / 0 failed / 0 skipped**, real localhost SSH/rsync **7/7**, offline smoke with `cloudCalls:0`, and a clean-tree package install (`sourceTreeDirty:false`). CI pins `@cortexkit/aft-pi@0.62.0` in an isolated prefix, so the two real-AFT loading orders execute on every push instead of skipping; their internal assertions on `Spawning binary:` and `Binary version:` in the AFT log are what distinguish a real backend from the bash-only fixture. Earlier install-time figures in this document are CI-cache-dependent and none is a device-speed promise.
 
@@ -190,3 +192,60 @@ Verified on commit `65a0253` (the PR head at merge) by CI runs [39732180527](htt
 - Selecting providers does not authorize spending. A separate default-No consent applies only to new credential-ready cloud profiles; missing credentials cannot gain new authorization. All choices/keys are held in memory until final save confirmation. Cancel-before-save leaves existing project bytes and newly entered keys unwritten; setup does not create/contact cloud resources. Private credential paths inside the repository remain refused.
 - `/reroute` offers the exact installed terminal command, shell-quoted with the current project path; it never spawns a terminal, collects unmasked keys or changes Pi/AFT Bash ownership.
 - [historical checkpoint] Strict types/build/smoke and 147/147 tests passed, no failures/skips, including 16 actual PTY quick-setup scenarios, preserved advanced PTY coverage, configuration compatibility and actual installed Pi 1.3/AFT 0.61 in both loading orders. New coverage includes both-provider entry, separate authorization, cancel at multiple stages, existing profile preservation, added accounts, native/saved/missing credentials, custom specs, SSH, unsafe credential paths and advanced fallback. No live cloud credentials or billable resource operations were used.
+
+## Modal mount-alias fix and lightweight live follow-up
+
+- Real Modal mounts exposed `/var/reroute-cache` as a symlink to `/__modal/volumes/vo-<ID>`. The supervisor previously rejected this legitimate provider alias before any archive I/O. It now accepts only that fixed alias with an immediate absolute, ID-shaped target, while retaining link-free mount/target ancestors and archive/member/source/artifact checks. Other layouts fail closed.
+- `tests/persistent-cache.test.mjs`: 19 focused component tests passed, including two new regressions for cross-scratch mount-alias persistence and rejected alternate targets/aliases, linked ancestors, linked archive files and malicious members.
+- Two repaired live tasks at 1 physical CPU / 2 GiB, 30-second task deadline and `python:3.12-slim-bookworm` both exited 0 without cache warnings. Cold Job `4e53a436-bf0e-45e3-bd01-951aa40e9fd8`: `cacheHit=false`, `cacheSaved=true`. After confirmed termination, new-Sandbox Job `ff055065-ef31-48b0-b923-7412622668f3`: `cacheHit=true`, `cacheSaved=true`, with the prior synthetic download marker asserted inside the task. SDK checks confirmed both Sandboxes stopped and zero running compute for this test owner. Local source and the root project's active Daytona profile were unchanged.
+- Evidence: `.artifacts/modal-cache-fixed-result.json`; initial failure/root-cause evidence remains in `.artifacts/modal-light-summary.md` and `.artifacts/modal-cache-repro-result.json`. This verifies archive mechanics across Sandbox lifetimes, not real Cargo/npm package validity or a build-speedup claim.
+- The two repaired probes reserved a total local estimate of USD 0.0896432; `actualBilledUsd` remains null. The test Volume/App are retained. Modal starter-image builds, full repository builds/tests, cancellation/crash recovery and billing remain unverified. Historical pending statements above predate this narrowly scoped follow-up.
+
+## Modal PATH repair and real-project acceptance
+
+Acceptance SHA `e6b68ad176bd6cbec4fea4e30d5eec54e207e89a` supersedes the lightweight-only/blocked status above for the tested daily build/test scope. One authorized single-Sandbox comparison proved Rust exists and native PATH is correct; `bash -lc` reads `/etc/profile` and removes `/usr/local/cargo/bin`, while `bash -c` and scratch CARGO_HOME with preserved RUSTUP_HOME work. Only Modal shell argv changed; no image recipe/version, task environment or Daytona changes. Thirty-seven focused tests passed, including a real-shell regression that failed before repair.
+
+Default Node/Rust/Python and Rust compilation passed. Identical real-repository cold/warm tasks ran npm ci, typecheck, build, complete tests and smoke in the same task directory each; both exited 0, 200 passed/0 failed/2 original host-AFT skips. Fresh-Sandbox warm archive restore succeeded; node_modules/dist were absent initially and rebuilt. Dependency install 8.814→6.783 s, execution 50.317→52.498 s, observed allocation/execution 145.387→193.245 s: no overall speedup claim. Full output/receipt hashes verified. All nine session Sandboxes freshly confirmed stopped; five App/Volume pairs retained, no deletion. Current request local reservations $0.4705216, actual billing unknown. Detailed report and exact resources: `.artifacts/modal-project-acceptance-UQxc8A/{SUMMARY.md,acceptance-result.json,all-session-resources.json}`. Complex live faults, actual billing, broad performance and shrinkwrap-change cache invalidation remain uncertified. These documentation updates postdate the frozen tested SHA; its code identity remains unchanged.
+
+
+## Daily-use optimization — unreleased working tree
+
+This section supersedes historical project-only installation and Modal-never-live wording; it does **not** turn prior live runs into acceptance of the new transfer code. Existing uncommitted Modal/Python/cache fixes and the `verification/` directory were retained. No commit, push, merge, npm publish, tag or GitHub Release was performed.
+
+### Fewer user steps
+
+- Recommend one **global native Pi package** installation and one masked `reroute setup`. User defaults are `$XDG_CONFIG_HOME/reroute/config.json` (fallback `~/.config/reroute/config.json`); no `.reroute.json` is needed in ordinary projects. `setup --project` and existing complete project files remain supported. Resolution is built-ins → user → top-level project overrides; named profiles replace whole profiles, not fragments of cost policy. No automatic migration or deletion.
+- Account policy authorizes future managed spending only inside its reviewed estimate envelope. Each canonical project/account separately needs explicit one-time consent before snapshot/upload or compute start. Pi obtains native confirmation; headless calls refuse until the user explicitly authorizes. Consent is private state outside source, revocable, and changes in credential reference, attached target, SSH port or identity need new consent. Default authentication and a named `native-default` account are distinct. Overridden user SSH identity paths remain excluded from uploaded inputs.
+- `/reroute` retains the existing panel/terminal wizard, separates saved credentials, connection check, policy/project authorization and successful actual task receipts, and exposes user default selection, project-only exceptions, recent jobs, local resource estimates and static environment hints. An optional 30-second smoke requires independent cost consent; opening the panel never runs it. No secret collection in Pi text fields.
+- Native copies use a runtime-event registration lease released on shutdown/reload. Real physical-copy tests in both orders and actual session reload retain exactly one Reroute tool/command owner. No Bash/AFT interception, classifier, model prediction, scheduler, provider failover or local retry was added. The model can choose remote directly for clearly heavy tasks.
+
+### Transfer evidence, not a cloud speedup claim
+
+Historical Modal receipts contain 72 files / 742,267 source bytes, snapshot preparation 428–446 ms, and combined transfer 82,308.5 / 123,696.3 ms. The old combined metric includes stage/verification RPCs and sequential SDK puts; it cannot isolate network throughput. The old full input requires 73 puts.
+
+SDK providers now upload one manifest-indexed gzip stream for changed file bytes plus the existing request, while rsync is unchanged. The existing manifest/needed-file baseline remains; this is not bidirectional or daemon synchronization. Private staging checks compressed size/hash, full gzip stream, bounded expansion, safe manifest paths and every file hash/mode before replacing baseline files. Existing two-read snapshots, secret exclusion, work verification, locks, unknown state, cache supervision and task receipt authority remain.
+
+Local before/after single samples, **128 × 64 KiB deliberately repetitive files, 10 ms injected latency per put, no cloud SDK**:
+
+| Input | put calls before → after | Combined transfer before → after |
+|---|---:|---:|
+| Cold | 129 → 2 | 1,612.5 → 419.0 ms |
+| Unchanged | 1 → 1 | 179.9 → 239.2 ms |
+| One changed file | 2 → 2 | 223.3 → 212.1 ms |
+
+This demonstrates less per-file API overhead, not a measured Modal improvement; the unchanged path was slower in this sample. Repetitive data intentionally compresses unusually well. Detailed local evidence: `.artifacts/transfer-performance.md`, `transfer-baseline.json`, `transfer-after.json`; reproducible current-path measurement: `node tests/transfer-measurement.mjs OUTPUT.json`.
+
+Metrics now distinguish snapshot, pack, manifest/file upload bytes and time, remote stage/unpack/verify/work preparation, cache restore/save bytes/time, execution, descendant/work cleanup and provider release. Some enclosing wall metrics overlap subphases; SDK wire overhead is not measured. Pi native updates expose actual stage boundaries without invented percentages; known-stage failures distinguish upload/verification/budget/cleanup from command exits. Random-token fixed-stage frames affect UI only, never task success or authorization.
+
+### Environment compatibility
+
+`src/environment.ts` inspects bounded allowlisted root declarations for npm/pnpm/Yarn/Bun, Rust and Python without execution, source edits or installs. The starter-image limitations are explicit. `npm-shrinkwrap.json` now takes npm bootstrap precedence and participates in dependency cache identity, alongside manifests/runtime declarations. Modern Yarn major versions retain immutable installation. Complex monorepos/full TOML resolution and arbitrary runtime installation are intentionally not implemented.
+
+### Current local verification
+
+- `npm run verify` with installed **Pi 1.4.0 / AFT 0.62.0** supplied to coexistence tests: types and build passed, **262 passed / 0 failed / 0 skipped**, CLI smoke passed with `cloudCalls:0`. The first post-review run caught a test fixture changing its SSH identity after authorization; the fixture now explicitly reauthorizes, preserving the tightened target boundary, and the full gate passed again.
+- Real Pi CLI global and project installation/discovery/scoped removal; two physical package copies and reload; real offline `/reroute` PTY setup-help/overview/close on bundled Pi 1.1 and installed Pi 1.4; Clack masked/cancel/default-cost and global-save PTYs all passed. Actual AFT backend coexistence passes in both loading orders, not only a Bash substitute.
+- Scoped authoritative TypeScript/Python diagnostics: **0 errors / 0 warnings**. Added fail-closed supervisor-identity validation before spawning and coverage for that branch.
+- Clean-prefix package installation and installed CLI smoke passed (`npm run check:package`); final tarball integrity and dirty-tree identity are recorded in `.artifacts/package-verification.json`. A dirty source checkout is not a new released commit.
+
+No new real cloud computation or paid model probe was run. New archive transport/global onboarding still require separately authorized Daytona/Modal acceptance; actual billing, general model-selection reliability, large/incompressible input cost and real network throughput remain unverified. Historical real-cloud toolchain/receipt/cache evidence remains valid only for the documented historical SHAs. Budgets are local estimates, retained storage can bill, and uncertain remote tasks can still require manual provider verification.

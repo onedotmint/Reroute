@@ -107,11 +107,13 @@ export async function cloudSummary(profile: Profile) {
     resources: Object.values(book.resources).map(r => ({ name: r.name, owner: r.owner, id: r.profile.id, state: r.state, compute: r.profile.compute, observedAt: r.observedAt })), notes: 'Local conservative reservations, not actual billing or credit. Retained storage may still cost money.' };
 }
 export async function withManagedResource<T extends { job: Job }>(root: string, config: Config, command: string,
-  options: { compute?: Partial<Compute>; timeoutMs?: number; signal?: AbortSignal },
+  options: { compute?: Partial<Compute>; timeoutMs?: number; signal?: AbortSignal; onProgress?: (progress: { stage: string; message: string }) => void },
   run: (profile: Profile, provider: Provider) => Promise<T>, factory = createProvider): Promise<T> {
+  const report = (stage: string, message: string) => { try { options.onProgress?.({ stage, message }); } catch {} };
+  report('budget', 'Checking reviewed policy, account estimate budget and resource ownership');
   const plan = cloudPlan(config, command, options.compute, options.timeoutMs), policy = plan.profile.managed;
-  if (!policy?.authorized) throw new Error('Managed cloud creation/start is not authorized. Review rates, limits and unknown credit in /reroute or setup first.');
-  if (plan.estimatedUsd > policy.maxTaskUsd) throw new Error(`Estimated reservation $${plan.estimatedUsd.toFixed(4)} exceeds the per-task limit; no resource created`);
+  if (!policy?.authorized) throw new Error('[configuration/authorization] Managed cloud creation/start is not authorized. Review rates, limits and unknown credit in /reroute or setup first.');
+  if (plan.estimatedUsd > policy.maxTaskUsd) throw new Error(`[budget] Estimated reservation $${plan.estimatedUsd.toFixed(4)} exceeds the per-task limit; no resource created`);
   return exclusive(plan.profile, async () => {
     options.signal?.throwIfAborted();
     const book = await ledger(plan.profile), owner = await ownerFor(root, config);
@@ -121,7 +123,7 @@ export async function withManagedResource<T extends { job: Job }>(root: string, 
     const blockers = (await listJobs()).filter(j => active(j) && (sameAccount(j.profile, plan.profile)
       || sameResource(j.profile, target) || (j.profile.provider === target.provider && j.profile.owner === owner)));
     if (blockers.length) throw new Error('Cloud account/resource has active/unresolved jobs: ' + blockers.map(j => j.id).join(', ') + '. Query status before new allocation or retry.');
-    if (book.reservedUsd + plan.estimatedUsd > policy.monthlyUsd) throw new Error('Local monthly estimate budget would be exceeded; official remaining credit is unavailable');
+    if (book.reservedUsd + plan.estimatedUsd > policy.monthlyUsd) throw new Error('[budget] Local monthly estimate budget would be exceeded; official remaining credit is unavailable');
     if (Object.entries(book.resources).some(([k, r]) => k !== key && ['intent', 'unknown'].includes(r.state))) throw new Error('An unresolved resource allocation blocks switching specs or projects; recover it before new spending');
     const fresh = !record || record.state === 'destroyed';
     if (fresh) record = { name: 'rr-' + key, owner, profile: plan.profile, state: 'intent', observedAt: new Date().toISOString() };
@@ -136,6 +138,7 @@ export async function withManagedResource<T extends { job: Job }>(root: string, 
     const start = performance.now();
     let cancelledAndStopped = false;
     try {
+      report('provision', 'Preparing owned compute and persistent download-cache storage');
       const resolved = await provider.ensureManaged({ name: record!.name, owner, create: fresh, start: true, guardMinutes: plan.guardMinutes, replaceStopped });
       record!.profile = resolved; record!.state = 'ready'; record!.observedAt = new Date().toISOString();
       await atomicJson(ledgerPath(plan.profile), book);
@@ -153,8 +156,12 @@ export async function withManagedResource<T extends { job: Job }>(root: string, 
       result.job.cost = { estimatedUsd: plan.estimatedUsd, runtimeSeconds: (performance.now() - start) / 1000, source: 'estimate', balance: 'unavailable' };
       if (active(result.job)) record!.state = 'unknown';
       else {
+        report('release', 'Applying provider idle/release policy; persistent storage is retained');
+        const releaseStart = performance.now();
         try { await provider.idle?.(policy.idleMinutes); if (plan.profile.provider === 'modal') record!.state = 'destroyed'; }
-        catch { result.job.error = (result.job.error ? result.job.error + '. ' : '') + 'Idle policy update unconfirmed; original guarded provider timeout remains. Inspect resource.'; }
+        catch { result.job.error = (result.job.error ? result.job.error + '. ' : '') + '[resource-cleanup] Idle policy update unconfirmed; original guarded provider timeout remains. Inspect resource.'; }
+        if (result.job.metrics) result.job.metrics.releaseMs = performance.now() - releaseStart;
+        report('complete', 'Task receipt retained; provider release/idle policy ' + (result.job.error ? 'requires inspection' : 'confirmed'));
       }
       return result;
     } catch (error) {
