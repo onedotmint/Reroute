@@ -37,7 +37,7 @@
     "@earendil-works/pi-coding-agent": "1.1.0",
     "@types/node": "22.20.5",
     "@types/shell-quote": "1.7.5",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-ai": "*" },
   "peerDependenciesMeta": { "@earendil-works/pi-coding-agent": { "optional": true }, "@earendil-works/pi-ai": { "optional": true } }
