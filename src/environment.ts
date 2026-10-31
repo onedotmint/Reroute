@@ -78,8 +78,10 @@ export async function inspectEnvironment(rootInput: string): Promise<Environment
   }
   const locks = nodeLocks.filter(([name]) => present.has(name));
   if (locks.length) lines.push(`Node lockfiles: ${locks.map(([name]) => name).join(', ')}`);
-  if (present.has('npm-shrinkwrap.json')) lines.push('npm effective lockfile: npm-shrinkwrap.json (takes precedence over package-lock.json)');
-  else if (present.has('package-lock.json')) lines.push('npm effective lockfile: package-lock.json');
+  if (present.has('npm-shrinkwrap.json')) {
+    lines.push('npm-shrinkwrap.json: npm <=11 uses it before package-lock.json; npm >=12 ignores it.');
+    warnings.push('Shrinkwrap bootstrap requires verified remote npm <=11; npm >=12 is refused even with package-lock.json. Declarations do not select the remote npm version.');
+  } else if (present.has('package-lock.json')) lines.push('npm effective lockfile: package-lock.json');
   if (new Set(locks.map(([, tool]) => tool)).size > 1) warnings.push('Multiple Node package-manager lockfiles; confirm the intended manager before running remotely.');
   if (manager && locks.length && !locks.some(([, tool]) => tool === manager)) warnings.push('Declared package manager does not match the available Node lockfiles.');
   if (present.has('package.json') && !locks.length) warnings.push('No supported Node lockfile; automatic dependency bootstrap is unavailable.');

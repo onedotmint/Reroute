@@ -1,0 +1,34 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    versioning-strategy: increase-if-necessary
+    groups:
+      runtime-patch-minor:
+        applies-to: version-updates
+        dependency-type: production
+        patterns: ['*']
+        exclude-patterns: ['@daytona/sdk', 'e2b', 'modal', '@earendil-works/*']
+        update-types: [patch, minor]
+      development-patch-minor:
+        applies-to: version-updates
+        dependency-type: development
+        patterns: ['*']
+        exclude-patterns: ['@earendil-works/*']
+        update-types: [patch, minor]
+    # SDKs, host packages, majors and security fixes remain individually reviewable.
+    # Security PRs are event-driven by GitHub alerts, not delayed until Monday.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions-patch-minor:
+        applies-to: version-updates
+        patterns: ['*']
+        update-types: [patch, minor]

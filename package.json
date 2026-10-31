@@ -11,7 +11,7 @@
   "bin": { "reroute": "bin/reroute.mjs" },
   "exports": { ".": "./dist/engine.js", "./pi": "./adapters/pi.ts" },
   "pi": { "extensions": ["./adapters/pi.ts"] },
-  "files": ["bin/reroute.mjs", "dist", "src", "adapters", "assets", "README.md", "DELIVERY.md", "LICENSE", "NOTICE", "docs", "npm-shrinkwrap.json"],
+  "files": ["bin/reroute.mjs", "dist", "src", "adapters", "assets", "README.md", "DELIVERY.md", "LICENSE", "NOTICE", "docs"],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
@@ -20,18 +20,20 @@
     "test:live": "node tests/live.mjs",
     "smoke": "node tests/smoke.mjs",
     "check:package": "node scripts/check-package.mjs",
+    "audit:dependencies": "node scripts/audit-dependencies.mjs",
     "benchmark": "node tests/benchmark.mjs",
     "verify": "npm run typecheck && npm run build && npm test && npm run smoke"
   },
   "dependencies": {
-    "@clack/prompts": "1.8.1",
-    "@daytona/sdk": "0.223.1",
-    "e2b": "2.55.0",
-    "ignore": "7.0.12",
-    "modal": "0.11.0",
-    "shell-quote": "1.12.0"
+    "@clack/prompts": "^1.8.1",
+    "@daytona/sdk": "~0.223.1",
+    "e2b": "~2.60.0",
+    "ignore": "^7.0.12",
+    "modal": "~0.11.0",
+    "shell-quote": "^1.12.0"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "1.1.0",
     "@earendil-works/pi-coding-agent": "1.1.0",
     "@types/node": "22.20.5",
     "@types/shell-quote": "1.7.5",

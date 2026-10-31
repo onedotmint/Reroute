@@ -22,6 +22,11 @@ applies_to:
   - assets/task.py
   - tests/managed*.test.mjs
   - tests/persistent-cache.test.mjs
+  - src/prepare.ts
+  - src/environment.ts
+  - tests/prepare.test.mjs
+  - tests/environment.test.mjs
+  - tests/npm-preparation.test.mjs
 ---
 # Managed cloud safety
 
@@ -51,3 +56,5 @@ The recommended native Pi package install is global. `reroute setup` saves user 
 Every remote run must verify a private local authorization receipt for the canonical current project and provider/account target **before snapshot preparation, upload or billable APIs**. Provider policy authorization alone is insufficient, including for preexisting v3 configurations. Pi may obtain an explicit user confirmation; noninteractive tools refuse until the user authorizes via the CLI. Neither a field in project source nor a model-supplied tool parameter can grant consent. Target/account changes need new consent; canonical aliases reuse consent. Revocation does not cancel running jobs or delete cloud resources. Global defaults never collapse the existing installation/project/profile ownership identity or account-wide reservation envelope.
 
 Environment declarations are read-only bounded hints, not executable configuration or evidence that an image satisfies them. Exclude the actual relocated user config and local state directories from source snapshots, in addition to credentials. No implicit provider failover, retry, new task classifier, Bash interception or dependency/image installation is introduced by global defaults.
+
+Automatic npm dependency preparation preserves `npm-shrinkwrap.json` support on npm <=11, including its precedence over `package-lock.json`. When the selected preparation directory contains shrinkwrap, check the actual remote `npm --version` inside the supervised, timeout-bound preparation child; `packageManager` and other declarations do not select or prove that runtime. npm >=12 ignores shrinkwrap, so refuse automatic preparation both for shrinkwrap-only and dual-lock projects rather than silently choosing package-lock. Failed or unparseable version probes also refuse preparation; a hung probe remains cancellable and times out with descendant cleanup. Refusal must prevent the main command, with no local retry, tool installation/downgrade, lockfile conversion or source writeback. Package-lock-only preparation is unchanged. Retain both locks in snapshot/cache identity, and keep static environment hints version-qualified without executing tools.
