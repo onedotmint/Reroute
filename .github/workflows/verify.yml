@@ -67,7 +67,7 @@ jobs:
         run: npm run check:package
       - name: Upload verified installer and evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reroute-npm-node-${{ matrix.node }}-npm-${{ matrix.npm }}-${{ github.sha }}
           path: .artifacts/
