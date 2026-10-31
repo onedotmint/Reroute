@@ -4,14 +4,14 @@
 
 Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands are not automatically offloaded (use ordinary Bash in Pi). Failed remote jobs never silently retry locally.
 
-**Version: 0.4.0.** Global-first native Pi installation, reusable account defaults, explicit per-project consent and packed source transfer. See [release notes](docs/RELEASE-0.4.0.md). Publication status is determined by [npm](https://www.npmjs.com/package/@onedotmint/reroute) and [GitHub Releases](https://github.com/onedotmint/Reroute/releases), not by a passing local build. The frozen candidate passed **Daytona and Modal four-scenario real-service acceptance**, native global installation/consent checks and six real-model selection categories after separately authorized harness corrections. See [release acceptance](docs/RELEASE-ACCEPTANCE.md) for the exact artifact hash, performance, retained empty Modal Apps and release gates. Historical full-repository/toolchain evidence remains version-specific; billing and broad fault recovery are not certified. No release was created by this acceptance.
+**Version: 0.4.1.** Dependency-security and npm-packaging patch: production high-risk dependency fixes, repository-only locking, host-provided Pi SDKs and reviewed automatic update PRs. See [0.4.1 release notes](docs/RELEASE-0.4.1.md) and the [remaining dependency findings](docs/DEPENDENCY-SECURITY.md). Publication status is determined by [npm](https://www.npmjs.com/package/@onedotmint/reroute), not by a passing build; no GitHub Release is required. Global-first installation, reusable defaults, per-project consent and packed source transfer from [0.4.0](docs/RELEASE-0.4.0.md) remain supported. Earlier [real-service acceptance](docs/RELEASE-ACCEPTANCE.md) is historical, not new cloud qualification for this patch. Billing and broad fault recovery remain uncertified.
 
 ## Install once as a global native Pi package (recommended)
 
 From WSL2/Linux with Pi and Node.js >= 22.19:
 
 ~~~bash
-pi install npm:@onedotmint/reroute@0.4.0
+pi install npm:@onedotmint/reroute@0.4.1
 cd /path/to/your-project
 pi
 ~~~
@@ -23,23 +23,23 @@ Pi owns package installation, loading, updates and removal. There is no handwrit
 ~~~bash
 pi list
 pi update --extensions
-pi remove npm:@onedotmint/reroute@0.4.0
+pi remove npm:@onedotmint/reroute@0.4.1
 ~~~
 
 **Optional project-only installation:** add `-l` to `pi install` / `pi remove`; Pi records it in `.pi/settings.json` and requires project trust. Use `setup --project` for special project configuration; existing files are not migrated or overwritten by global setup. A global and a project copy may coexist without registering duplicate Reroute tools; keep versions aligned and remove an obsolete copy through Pi. For noninteractive inspection, `pi list --approve` permits reading trusted project settings; `--no-approve` hides them.
 
-For a versioned Git install, use `pi install git:github.com/onedotmint/Reroute@v0.4.0`. The Git checkout does not need a built `dist/`: Pi's native TypeScript loader loads `adapters/pi.ts` and source modules directly. For a local checkout, use `pi install /absolute/path/to/Reroute` (add `-l` only for project-only installation). Historical 0.3.x packages do not contain all 0.4.0 changes.
+For a historical 0.4.0 Git install, use `pi install git:github.com/onedotmint/Reroute@v0.4.0`; this is not the 0.4.1 patch. Use the versioned npm install above for 0.4.1. The Git checkout does not need a built `dist/`: Pi's native TypeScript loader loads `adapters/pi.ts` and source modules directly. For a local checkout, use `pi install /absolute/path/to/Reroute` (add `-l` only for project-only installation). Historical 0.3.x packages do not contain all 0.4.0 changes.
 
-The npm package is **`@onedotmint/reroute`**, not the unrelated unscoped `reroute`; the CLI command remains **`reroute`**. The npm example pins this release; check registry availability before installing. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `onedotmint-reroute-0.4.0.tgz` for the **optional standalone CLI**; an uploaded CI artifact does not by itself publish to npm or create a GitHub Release.
+The npm package is **`@onedotmint/reroute`**, not the unrelated unscoped `reroute`; the CLI command remains **`reroute`**. The npm example pins this release; check registry availability before installing. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `onedotmint-reroute-0.4.1.tgz` for the **optional standalone CLI**; an uploaded CI artifact does not by itself publish to npm or create a GitHub Release.
 
 ### Optional CLI and masked API keys
 
 The `/reroute` Pi screen can create, inspect and edit project profiles without the CLI. For Daytona / Modal / E2B credentials, prefer each provider's native environment or authentication. **Pi's text inputs are not masked**: never type API keys into an ordinary Pi input prompt.
 
-For masked API-key entry, read-only resource discovery and advanced diagnostics, install the optional CLI from npm. Alternatively, install `./onedotmint-reroute-0.4.0.tgz` from a successful GitHub Actions run:
+For masked API-key entry, read-only resource discovery and advanced diagnostics, install the optional CLI from npm. Alternatively, install `./onedotmint-reroute-0.4.1.tgz` from a successful GitHub Actions run:
 
 ~~~bash
-npm install -g @onedotmint/reroute@0.4.0
+npm install -g @onedotmint/reroute@0.4.1
 cd /path/to/your-project
 reroute setup
 reroute doctor --connect
