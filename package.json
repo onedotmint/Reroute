@@ -27,7 +27,7 @@
   "dependencies": {
     "@clack/prompts": "^1.8.1",
     "@daytona/sdk": "~0.223.1",
-    "e2b": "~2.60.0",
+    "e2b": "~2.61.0",
     "ignore": "^7.0.12",
     "modal": "~0.11.0",
     "shell-quote": "^1.12.0"
