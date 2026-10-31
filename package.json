@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",
-    "@daytona/sdk": "~0.223.1",
+    "@daytona/sdk": "~0.226.1",
     "e2b": "~2.60.0",
     "ignore": "^7.0.12",
     "modal": "~0.11.0",
