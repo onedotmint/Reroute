@@ -654,8 +654,18 @@ def main(action, data):
             raise ValueError('Unsupported dependency preparation')
         if argv[0] == 'pnpm':
             argv += ['--store-dir', str(cache / 'pnpm')]
+        bootstrap = shlex.join(argv)
+        if argv[0] == 'npm' and (directory / 'npm-shrinkwrap.json').is_file():
+            # Keep the version probe inside the supervised child, including its timeout and cleanup.
+            check = ('npm_version=$(npm --version) && '
+                     '[[ "$npm_version" =~ ^(0|[1-9][0-9]*)[.][0-9]+[.][0-9]+(-[0-9A-Za-z-]+([.][0-9A-Za-z-]+)*)?([+][0-9A-Za-z-]+([.][0-9A-Za-z-]+)*)?$ ]] && '
+                     '[[ "${BASH_REMATCH[1]}" =~ ^([0-9]|10|11)$ ]]')
+            message = ('npm dependency preparation refused: npm-shrinkwrap.json requires a verified npm <=11; '
+                       'npm >=12 ignores it, even beside package-lock.json. '
+                       'Use a compatible npm 11 environment or review and migrate the lockfile.')
+            bootstrap = '{ if ! { ' + check + '; }; then printf \'%s\\n\' ' + shlex.quote(message) + ' >&2; exit 1; fi; ' + bootstrap + '; }'
         # Per-task dependency directories avoid stale workspace symlinks; downloads are cached.
-        command = '(cd ' + shlex.quote(str(directory)) + ' && ' + shlex.join(argv) + ') && ' + command
+        command = '(cd ' + shlex.quote(str(directory)) + ' && ' + bootstrap + ') && ' + command
     if (job / 'cancel').exists():
         persistent = None
         return finish('cancelled', 130)

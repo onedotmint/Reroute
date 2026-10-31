@@ -31,18 +31,36 @@ test('Node managers, engines and root version declarations are static, bounded h
   }
 });
 
-test('npm-shrinkwrap takes precedence and mixed or mismatched managers are warned', async t => {
+test('shrinkwrap compatibility is version-qualified and mixed or mismatched managers are warned', async t => {
   const root = await fixture(t, {
     'package.json': '{"packageManager":"npm@11.0.0+sha512.abcdef"}',
     'npm-shrinkwrap.json': '{}', 'package-lock.json': '{}', 'yarn.lock': '', 'bun.lock': '',
   });
   let result = await inspectEnvironment(root);
   assert.ok(result.lines.includes('Package manager: npm@11.0.0'));
-  assert.ok(result.lines.includes('npm effective lockfile: npm-shrinkwrap.json (takes precedence over package-lock.json)'));
+  assert.ok(result.lines.includes('npm-shrinkwrap.json: npm <=11 uses it before package-lock.json; npm >=12 ignores it.'));
+  assert.match(result.warnings.join('\n'), /npm >=12 is refused even with package-lock.json/);
+  assert.ok(!result.lines.some(line => line.startsWith('npm effective lockfile:')));
   assert.match(result.warnings.join('\n'), /Multiple Node/);
   await writeFile(join(root, 'package.json'), '{"packageManager":"pnpm@10.0.0"}');
   result = await inspectEnvironment(root);
   assert.match(result.warnings.join('\n'), /does not match/);
+});
+
+test('shrinkwrap-only and dual-lock hints never infer the runtime from packageManager', async t => {
+  for (const packageManager of [undefined, 'npm@11.21.1', 'npm@12.0.0']) {
+    for (const dual of [false, true]) {
+      const files = { 'package.json': JSON.stringify({ packageManager }), 'npm-shrinkwrap.json': '{}' };
+      if (dual) files['package-lock.json'] = '{}';
+      const root = await fixture(t, files), before = await readdir(root);
+      const result = await inspectEnvironment(root);
+      assert.match(result.lines.join('\n'), /npm <=11 uses it before package-lock.json; npm >=12 ignores it/);
+      assert.match(result.warnings.join('\n'), /Declarations do not select the remote npm version/);
+      assert.ok(!result.lines.some(line => line.startsWith('npm effective lockfile:')));
+      assert.deepEqual(await readdir(root), before);
+      assert.equal(await readFile(join(root, 'package.json'), 'utf8'), files['package.json']);
+    }
+  }
 });
 
 test('Rust and Python toolchains, manifests and dependency files are recognized without executing tools', async t => {
