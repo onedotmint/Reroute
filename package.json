@@ -33,7 +33,7 @@
     "shell-quote": "^1.12.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-ai": "1.4.0",
     "@earendil-works/pi-coding-agent": "1.1.0",
     "@types/node": "22.20.5",
     "@types/shell-quote": "1.7.5",
