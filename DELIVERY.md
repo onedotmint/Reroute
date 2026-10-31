@@ -1,4 +1,10 @@
-# Reroute delivery ledger — 0.4.0 release
+# Reroute delivery ledger — 0.4.1 patch
+
+**Current patch:** 0.4.1 distributes the dependency/security/packaging governance merged in PR #5. See [patch release notes](docs/RELEASE-0.4.1.md) and [dependency security](docs/DEPENDENCY-SECURITY.md) for current scope, upstream findings and installation validation. The release tarball is `onedotmint-reroute-0.4.1.tgz`; publication must be confirmed in npm. No new cloud-service or billing acceptance is claimed.
+
+## Historical 0.4.0 release ledger
+
+The entries below retain their original checkpoint versions, artifact names and acceptance scope; they are not new 0.4.1 measurements.
 
 **Current acceptance:** the frozen working-tree candidate passed both providers' four-scenario real-cloud rechecks, native global installation/consent checks and the six model-selection categories. Earlier harness failures and explicitly authorized rechecks are retained, not relabelled. Exact artifact identity, measurements, remaining empty Modal Apps and release gates are in [Release acceptance](docs/RELEASE-ACCEPTANCE.md). Earlier sections below are historical checkpoints, not claims about every later working tree.
 
