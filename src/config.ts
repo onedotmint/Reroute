@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { access, readdir, readFile, realpath, rm } from 'node:fs/promises';
 import { PROVIDERS, type Config, type Profile, type Job } from './types.js';
-import { atomicJson, hash, jsonFile, noSymlink, processExec } from './util.js';
+import { atomicJson, hash, inside, jsonFile, noSymlink, processExec } from './util.js';
 export const defaults = (): Config => ({ version: 3, active: '', mode: 'auto', profiles: {}, tasks: ['build', 'test', 'check', 'benchmark'], remote: [], local: [], timeoutSeconds: 1800 });
 export function validate(c: Config): Config {
   const secretKey = (value: unknown): boolean => !!value && typeof value === 'object' && Object.entries(value).some(([key, item]) => /api.?key|token.?secret|password|^secrets?$|^credentials$/i.test(key) || secretKey(item));
@@ -37,20 +37,27 @@ export function validate(c: Config): Config {
   }
   return c;
 }
-export async function projectRoot(cwd: string): Promise<string> {
+export async function projectRoot(cwd: string, boundary?: string): Promise<string> {
   const start = await realpath(cwd);
+  if (boundary !== undefined) {
+    boundary = await realpath(boundary);
+    if (!inside(boundary, start)) throw new Error('Working directory is outside the trusted project boundary');
+  }
   const git = await processExec('git', ['-C', start, 'rev-parse', '--show-toplevel']).catch(() => undefined);
   if (git?.stdoutTruncated) throw new Error('Project root response truncated');
-  const boundary = git?.code === 0 ? await realpath(git.stdout.trim()) : undefined;
+  const gitRoot = git?.code === 0 ? await realpath(git.stdout.trim()) : undefined;
+  // Reject before checking nested configs: a narrower root must not hide an out-of-bound Git project.
+  if (boundary !== undefined && gitRoot && !inside(boundary, gitRoot)) throw new Error('Git project root is outside the trusted project boundary');
   let current = start, manifestRoot: string | undefined;
   for (;;) {
-    if (!boundary && !manifestRoot) for (const name of ['package.json', 'Cargo.toml', 'pyproject.toml']) {
+    if (!gitRoot && !manifestRoot) for (const name of ['package.json', 'Cargo.toml', 'pyproject.toml']) {
       try { await access(join(current, name)); manifestRoot = current; break; }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
     try { await access(join(current, '.reroute.json')); return current; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    if (current === boundary) return current;
+    if (current === gitRoot) return current;
+    if (current === boundary) break;
     const parent = dirname(current); if (parent === current) break; current = parent;
   }
   return manifestRoot ?? start;
@@ -66,8 +73,8 @@ function overlay(base: Config | undefined, project: Partial<Config>): Config {
   if (project.profiles !== undefined && (!project.profiles || typeof project.profiles !== 'object' || Array.isArray(project.profiles))) throw new Error('Project profiles must be a named object');
   return validate({ ...defaults(), ...base, ...project, profiles: { ...base?.profiles, ...project.profiles } });
 }
-export async function loadConfig(cwd: string): Promise<{ root: string; config?: Config; source?: 'global' | 'project' | 'merged' }> {
-  const root = await projectRoot(cwd), project = await jsonFile<Partial<Config>>(join(root, '.reroute.json'));
+export async function loadConfig(cwd: string, boundary?: string): Promise<{ root: string; config?: Config; source?: 'global' | 'project' | 'merged' }> {
+  const root = await projectRoot(cwd, boundary), project = await jsonFile<Partial<Config>>(join(root, '.reroute.json'));
   const global = await loadUserConfig();
   if (project !== undefined) return { root, config: overlay(global, project), source: global ? 'merged' : 'project' };
   return { root, config: global, source: global ? 'global' : undefined };

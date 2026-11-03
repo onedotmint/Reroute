@@ -19,11 +19,11 @@ const packed = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', ou
 // npm 11 emits an array; npm 12 keys the result by package name.
 const pack = Array.isArray(packed) ? packed[0] : packed[source.name];
 assert.equal(pack?.name, source.name, 'npm pack must return this package');
-for (const file of ['dist/cli.js', 'assets/task.py', 'adapters/pi.ts', 'README.md', 'DELIVERY.md', 'NOTICE', 'LICENSE']) {
+for (const file of ['dist/cli.js', 'dist/dsh.js', 'dist/dsh.d.ts', 'cordis.patch.yml', 'assets/task.py', 'adapters/pi.ts', 'README.md', 'DELIVERY.md', 'NOTICE', 'LICENSE']) {
   assert.ok(pack.files.some(entry => entry.path === file), `Package missing ${file}`);
 }
 for (const file of pack.files) {
-  assert.ok(/^(bin\/reroute\.mjs|dist\/|src\/|adapters\/|assets\/|docs\/|package\.json$|README\.md$|DELIVERY\.md$|LICENSE$|NOTICE$)/.test(file.path), file.path);
+  assert.ok(/^(bin\/reroute\.mjs|dist\/|src\/|adapters\/|assets\/|docs\/|cordis\.patch\.yml$|package\.json$|README\.md$|DELIVERY\.md$|LICENSE$|NOTICE$)/.test(file.path), file.path);
   assert.ok(!/(^|\/)(node_modules|\.git|\.env|\.reroute|\.npmrc|npm-shrinkwrap\.json|package-lock\.json|rerouted|sync-back)(\/|$)/.test(file.path), file.path);
 }
 assert.equal(source.scripts.preinstall, undefined);
@@ -63,7 +63,7 @@ try {
     const pkg = JSON.parse(await readFile(join(packageDir, 'package.json'), 'utf8'));
     assert.equal(pkg.name, source.name);
     assert.equal(pkg.version, source.version);
-    for (const name of ['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai', '@google/genai', 'esbuild', 'typescript']) {
+    for (const name of ['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai', ...Object.keys(source.peerDependencies).filter(name => name.startsWith('@deepseek-ai/')), '@google/genai', 'esbuild', 'typescript']) {
       await assert.rejects(access(join(prefix, 'node_modules', name)), { code: 'ENOENT' }, `Unexpected production dependency: ${name}`);
     }
     for (const lock of ['npm-shrinkwrap.json', 'package-lock.json']) await assert.rejects(access(join(packageDir, lock)), { code: 'ENOENT' });

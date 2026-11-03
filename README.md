@@ -1,8 +1,8 @@
 # Reroute
 
-**Keep editing locally in WSL2 and using Pi normally. Send eligible builds and tests to remote compute.**
+**Keep editing locally in WSL2/Linux with Pi or DeepSeek Harness. Send eligible builds and tests to remote compute.**
 
-Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands are not automatically offloaded (use ordinary Bash in Pi). Failed remote jobs never silently retry locally.
+Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands are not automatically offloaded (use the host's ordinary shell tools). Failed remote jobs never silently retry locally.
 
 **Version: 0.4.1.** Dependency-security and npm-packaging patch: production high-risk dependency fixes, repository-only locking, host-provided Pi SDKs and reviewed automatic update PRs. See [0.4.1 release notes](docs/RELEASE-0.4.1.md) and the [remaining dependency findings](docs/DEPENDENCY-SECURITY.md). Publication status is determined by [npm](https://www.npmjs.com/package/@onedotmint/reroute), not by a passing build; no GitHub Release is required. Global-first installation, reusable defaults, per-project consent and packed source transfer from [0.4.0](docs/RELEASE-0.4.0.md) remain supported. Earlier [real-service acceptance](docs/RELEASE-ACCEPTANCE.md) is historical, not new cloud qualification for this patch. Billing and broad fault recovery remain uncertified.
 
@@ -50,6 +50,35 @@ The standalone CLI manages user defaults, explicit project overrides and opt-in 
 ### Migrating from the earlier handwritten extension
 
 Earlier Reroute candidates installed `~/.pi/agent/extensions/reroute.ts` globally. Before enabling the new native package, inspect that file. **Only remove it if its first line is `// Reroute v3 owned extension entry`**; leave unowned or modified files untouched. The new installer does not delete any global extensions automatically. Earlier handwritten global/project entries may conflict or still override Bash; native-copy deduplication cannot make those legacy implementations safe. Updating the native package does not retire a separate historical extension. Restart Pi (or reload extensions) after updating; no reinstall is normally needed for an existing branch-based native package. Use the local-checkout installation above to try unreleased work.
+
+## DeepSeek Harness native plugin — unreleased current build
+
+**WIP checkpoint — do not enable for real projects or paid compute yet.** Two approval-wait policy/configuration races remain open. See [current status and blockers](docs/DEEPSEEK-HARNESS-STATUS.md).
+
+Pi remains supported, including its existing `/reroute` panel and source-only package loading. The same npm package adds `./dsh` → `dist/dsh.js` and a `dsh.bundle.patch` pointing to `cordis.patch.yml`; Harness registers **only `reroute_run` and `reroute_status`**. No new settings panel, Bash interception or Harness background jobs.
+
+**This integration is not published; npm `0.4.1` must not be assumed to include it.** From the current source checkout, build and pack it, then install that actual tarball (the unchanged version in its filename is not proof of feature availability):
+
+~~~bash
+npm run build
+npm pack
+dsh plugin --profile web add ./onedotmint-reroute-0.4.1.tgz
+npm install -g ./onedotmint-reroute-0.4.1.tgz  # CLI from the same build
+cd /path/to/your-project
+reroute setup
+# Human: review project root, upload scope, provider/account, scripts and spending policy.
+reroute authorize --yes
+~~~
+
+After a release containing this integration is actually published, the registry form is `dsh plugin --profile web add @onedotmint/reroute`; do not use it to test this unreleased change. The preview API is pinned to **DSH `0.2.1-rc.5`**, not all 0.2.x. SDKs are host-provided, not production dependencies. Initial fixture evidence is Linux / Node 24 only, not real-model or paid-cloud acceptance.
+
+Every new run additionally needs Harness **`allowed-once`** approval. Policy `never` rejects; missing approval service fails closed. Read-only or active plan mode refuses new runs. The model must not perform setup/authorization on the user's behalf. Existing command eligibility, project consent and budget gates remain unchanged.
+
+Only local Host projects with provable same-file mapping are supported. Both cwd and canonical project root must stay within the Session's **immutable `workspaceRoot`**; a higher Git root is refused with a request to reopen at the complete project root. Harness's root is originally a **write-permission root**, not an upload sandbox: this stricter source-upload boundary is Reroute policy, and neither approval nor cwd changes can widen it.
+
+Status is remotely read-only but may update the local receipt. Revoking execution consent does not block queries of old jobs in the admitted current project; foreign jobs remain inaccessible, and E2B verification stays fail closed. After cancellation, native text retains the Job ID, but Harness removes the canonical value and PTC sees only a cancellation error. Harness-only `reroute_status({})` recovers the latest allocated Job ID for the **current live Session**, still subject to current-project checks. Reload/restart loses that implicit mapping: use `reroute_status({ jobId: "..." })`, or find the ID with `reroute jobs`. Failure/unknown never triggers automatic retry; a local rerun needs user authorization. Unload explicitly aborts and awaits owned calls, but hard process exit does not guarantee remote termination or cloud-resource shutdown.
+
+See [Harness installation and safety contract](docs/DEEPSEEK-HARNESS.md) and [engineering boundaries](specs/engineering/harness-tool-ownership.md). Recorded targeted checks are in [DELIVERY](DELIVERY.md#deepseek-harness--unreleased-current-build); full regression was deferred by request, and historical Pi/cloud results are not Harness acceptance.
 
 ## Friendly setup and Pi control panel
 
@@ -139,7 +168,7 @@ Automatic routing fails closed for unrecognized top-level commands, redirects, p
 
 ### Job status without the CLI
 
-Call `reroute_status({ jobId: "..." })` after an execution failure or unknown result. This tool accepts only `jobId` and only queries jobs belonging to the canonical current project root, including calls from nested directories or filesystem aliases. Invalid, missing and cross-project jobs fail without contacting a provider or revealing a foreign job's details.
+Call `reroute_status({ jobId: "..." })` after an execution failure or unknown result. In Pi this tool requires `jobId`; Harness also offers [live-Session recovery with `{}`](docs/DEEPSEEK-HARNESS.md#cancellation-and-recovery). Queries only access jobs belonging to the canonical current project root, including calls from nested directories or filesystem aliases (Harness additionally enforces its workspace boundary). Invalid, missing and cross-project jobs fail without contacting a provider or revealing a foreign job's details.
 
 The result explicitly separates:
 
@@ -208,4 +237,4 @@ For the precise SDK evidence, retained billing risks, limitations and authorized
 
 ## Dependency and release maintenance
 
-Development/CI uses the committed `package-lock.json` with `npm ci --ignore-scripts`; published npm packages contain neither lockfile nor install hooks. Pi SDKs are host-provided optional peers, not bundled runtime dependencies. Dependabot proposes reviewed updates; nothing auto-merges or publishes. See [dependency security and installation policy](docs/DEPENDENCY-SECURITY.md) for remaining upstream findings, script permissions, npm 11/12 behavior and verification evidence.
+Development/CI uses the committed `package-lock.json` with `npm ci --ignore-scripts`; published npm packages contain neither lockfile nor install hooks. Pi and Harness SDKs are host-provided, not bundled runtime dependencies (Pi's SDKs remain optional peers). Dependabot proposes reviewed updates; nothing auto-merges or publishes. See [dependency security and installation policy](docs/DEPENDENCY-SECURITY.md) for remaining upstream findings, script permissions, npm 11/12 behavior and verification evidence.
