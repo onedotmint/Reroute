@@ -139,48 +139,42 @@ async function editCloudSettings(ctx: ExtensionCommandContext, profile: Profile)
 
 /** Mirrors setup's quick defaults; a saved but unreviewed policy is never billed. */
 async function quickProfile(ctx: ExtensionCommandContext, provider: ProviderId, name: string): Promise<Profile | undefined> {
+  if (provider !== 'daytona' && provider !== 'modal') throw new Error('Managed compute supports Daytona or Modal only');
   const modal = provider === 'modal';
   const profile: Profile = { provider, credential: name, id: 'auto', image: TOOLCHAIN_IMAGE, compute: { ...presets.small! },
-    managed: defaultPolicy(provider as 'daytona' | 'modal') };
+    managed: defaultPolicy(provider) };
   if (!await ctx.ui.confirm('Use recommended cloud settings for ' + name + '?',
     'Provider: ' + provider + (modal ? ' (physical cores)' : ' (vCPU)') + '\nCompute: ' + profile.compute!.cpu + ' CPU / ' + profile.compute!.memoryGiB + ' GiB; image ' + profile.image +
     '\nLocal estimate budget: $' + profile.managed!.monthlyUsd.toFixed(2) + '/month per account, $' + profile.managed!.maxTaskUsd.toFixed(2) + '/task\nRates: CPU $' + profile.managed!.cpuHourUsd + '/hour, memory $' + profile.managed!.memoryGiBHourUsd + '/GiB-hour\nCredit and actual billing are UNKNOWN. Amounts are local estimates, not hard bill caps.\nNo = nothing saved; custom specifications need reroute setup in a terminal.')) return undefined;
-  profile.managed!.authorized = await ctx.ui.confirm('SPENDING — authorize future paid creation/start for ' + name + '?',
-    'Yes saves an explicit spending authorization: future tasks may create/start managed compute within the estimates above.\nNo saves the profile unauthorized; nothing can be created or started until you authorize it.\nThis is separate from the one-time project consent for uploading source and running it remotely.');
+  const spending = await ctx.ui.select('SPENDING — authorize future paid creation/start for ' + name + '?\n' +
+    'Yes permits future tasks to create/start managed compute within the estimates above.\nNo saves the profile without spending authorization.\nThis is separate from project consent for uploading source and running it remotely.',
+    ['No — save without spending authorization', 'Yes — authorize paid creation/start']);
+  if (spending === undefined) return undefined;
+  profile.managed!.authorized = spending === 'Yes — authorize paid creation/start';
   return profile;
 }
-/** Input is never echoed: only a mask is rendered, and the value goes straight to the private file. */
+/** Use Pi's input parser for paste, Kitty keys and grapheme editing, but never render its plaintext. */
 async function maskedInput(ctx: ExtensionCommandContext, title: string): Promise<string | undefined> {
   return ctx.ui.custom<string | undefined>(async (tui, theme, _keys, done) => {
-    // matchesKey, not literal escapes: kitty protocol sends arrows as CSI u (\x1b[1;1D), so a
-    // hardcoded '\x1b[D' compare silently fails in real terminals.
-    const { matchesKey, Key } = await import('@earendil-works/pi-tui');
-    let chars: string[] = [], cursor = 0;
+    const { Input, truncateToWidth } = await import('@earendil-works/pi-tui');
+    const input = new Input();
+    input.onSubmit = done;
+    input.onEscape = () => done(undefined);
     return {
-      render: (width: number) => [theme.fg('accent', title), ' ' + '*'.repeat(Math.min(chars.length, Math.max(0, width - 2))),
-        theme.fg('dim', 'Enter accepts • ←/→ move • Esc cancels • input is not echoed')],
-      invalidate: () => {},
+      get focused() { return input.focused; },
+      set focused(value: boolean) { input.focused = value; },
+      render: (width: number) => [theme.fg('accent', title), ' ' + '*'.repeat(Math.min(input.getValue().length, Math.max(0, width - 2))),
+        theme.fg('dim', 'Enter accepts • ←/→ move • Esc cancels • input is not echoed')].map(line => truncateToWidth(line, width)),
+      invalidate: () => input.invalidate(),
       handleInput: (data: string) => {
-        if (matchesKey(data, Key.enter)) return done(chars.join(''));
-        if (matchesKey(data, Key.escape)) return done(undefined);
-        if (matchesKey(data, Key.backspace)) { if (cursor > 0) { chars.splice(--cursor, 1); } }
-        else if (matchesKey(data, Key.delete)) chars.splice(cursor, 1);
-        else if (matchesKey(data, Key.left)) cursor = Math.max(0, cursor - 1);
-        else if (matchesKey(data, Key.right)) cursor = Math.min(chars.length, cursor + 1);
-        else if (matchesKey(data, Key.home)) cursor = 0;
-        else if (matchesKey(data, Key.end)) cursor = chars.length;
-        // Graphemes keep IME/emoji/combining sequences whole instead of splitting code units.
-        else if (data && !data.startsWith('\x1b') && !/[\0-\x1f\x7f]/.test(data)) {
-          for (const part of (globalThis.Intl.Segmenter ? [...new globalThis.Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(data)].map(s => s.segment) : [data]))
-            chars.splice(cursor++, 0, part);
-        }
+        input.handleInput(data);
         tui.requestRender();
       },
     };
   });
 }
 /** Masks at entry and writes only to the private credential file; the value never reaches .reroute.json or a notify. */
-async function enterSecrets(ctx: ExtensionCommandContext, root: string, provider: ProviderId, account: string): Promise<SecretMap | undefined> {
+async function enterSecrets(ctx: ExtensionCommandContext, root: string, provider: ProviderId, account?: string): Promise<SecretMap | undefined> {
   const values: SecretMap = {};
   for (const key of secretNames[provider]) {
     const entered = await maskedInput(ctx, provider + ' — ' + key + ' (hidden input)');
@@ -202,9 +196,17 @@ async function adoptSavedCredentials(ctx: ExtensionCommandContext, root: string,
   const picked = await ctx.ui.select('Use a saved credential account (no terminal needed)', labels);
   if (!picked) return false;
   const target = ready[labels.indexOf(picked)]!;
-  const profile = await quickProfile(ctx, target.provider, target.account);
+  const base = projectOnly ? (await loadConfig(root)).config ?? defaults() : (await loadUserConfig()) ?? defaults();
+  const existing = base.profiles[target.account];
+  if (existing?.managed && (await cloudSummary(existing)).resources.length) throw new Error('Recorded managed resources may retain billable storage even after compute destruction. Keep this profile/account reference; use Compute & budget instead of replacing it.');
+  if (existing && !await ctx.ui.confirm('Replace saved profile ' + target.account + '?', 'Existing settings will be replaced. Nothing remote is changed.')) return false;
+  let profile: Profile | undefined;
+  if (target.provider === 'e2b') {
+    const id = (await ctx.ui.input('Existing E2B sandbox ID', existing?.provider === 'e2b' ? existing.id : ''))?.trim();
+    if (!id) return false;
+    profile = { provider: 'e2b', id, credential: target.account };
+  } else profile = await quickProfile(ctx, target.provider, target.account);
   if (!profile) return false;
-  const base = (await loadUserConfig()) ?? defaults();
   const config: Config = { ...base, profiles: { ...base.profiles, [target.account]: profile }, active: target.account };
   validate(config);
   await saveSettings(root, config, projectOnly);
@@ -223,8 +225,9 @@ async function quickOnboard(ctx: ExtensionCommandContext, root: string, projectO
   const choice = await ctx.ui.select('Choose a provider (nothing is created by saving)', labels);
   if (!choice) return false;
   const provider = options[labels.indexOf(choice)]!.provider;
-  const base = (await loadUserConfig()) ?? defaults();
+  const base = projectOnly ? (await loadConfig(root)).config ?? defaults() : (await loadUserConfig()) ?? defaults();
   const name = provider, existing = base.profiles[name];
+  if (existing?.managed && (await cloudSummary(existing)).resources.length) throw new Error('Recorded managed resources may retain billable storage even after compute destruction. Keep this profile/account reference; use Compute & budget instead of replacing it.');
   if (existing && !await ctx.ui.confirm('Replace saved profile ' + name + '?', 'Use Add provider in Manage providers to keep both. Nothing remote is changed.')) return false;
   if (provider === 'ssh') {
     const host = (await ctx.ui.input('SSH host you already use (alias or user@host)', existing?.id ?? ''))?.trim();
@@ -332,7 +335,7 @@ async function editProfile(ctx: ExtensionCommandContext, root: string, config: C
   await saveSettings(root, next, projectOnly);
   const missingKey = secretNames[provider as ProviderId]?.length && await credentialStatus(provider as ProviderId, profile.credential) === 'missing';
   ctx.ui.notify('Saved ' + name + '.' + (missingKey
-    ? ' This profile still needs a key: use Configure in Pi (hidden input) or reroute setup, or it will fail closed.'
+    ? ' This profile still needs a key: use Manage providers → Enter missing API key (hidden input), or reroute setup, or it will fail closed.'
     : ' Nothing was created or started.'), 'info');
   return true;
 }
@@ -345,14 +348,27 @@ function showSetup(ctx: ExtensionCommandContext, root: string, projectOnly = fal
 async function manageProfiles(ctx: ExtensionCommandContext, root: string, config: Config, projectOnly = false): Promise<boolean> {
   const names = Object.keys(config.profiles);
   const selected = await ctx.ui.select((projectOnly ? 'Project overrides' : 'Global provider defaults') + ' (' + names.length + ')', [
-    'Configure providers / API keys (masked terminal)', 'Add provider', 'Edit provider', 'Switch active provider', 'Discover existing resources', 'Remove local profile', 'Back',
+    'Configure in Pi (recommended, hidden key input)', 'Use a saved credential account', 'Enter missing API key (hidden input)', 'Advanced terminal setup',
+    'Add provider', 'Edit provider', 'Switch active provider', 'Discover existing resources', 'Remove local profile', 'Back',
   ]);
   if (!selected || selected === 'Back') return false;
-  if (selected === 'Configure providers / API keys (masked terminal)') { showSetup(ctx, root, projectOnly); return false; }
+  if (selected === 'Configure in Pi (recommended, hidden key input)') return quickOnboard(ctx, root, projectOnly);
+  if (selected === 'Use a saved credential account') return adoptSavedCredentials(ctx, root, projectOnly);
+  if (selected === 'Advanced terminal setup') { showSetup(ctx, root, projectOnly); return false; }
   if (selected === 'Add provider') return editProfile(ctx, root, config, undefined, projectOnly);
 
   const name = await ctx.ui.select('Select profile', names);
   if (!name) return false;
+  if (selected === 'Enter missing API key (hidden input)') {
+    const profile = config.profiles[name]!;
+    if (!secretNames[profile.provider].length) { ctx.ui.notify('This provider uses native authentication; no API key is stored.', 'info'); return false; }
+    if (await credentialStatus(profile.provider, profile.credential) !== 'missing') { ctx.ui.notify('Credentials already available. Use Advanced → Forget saved API key before replacing a saved key.', 'info'); return false; }
+    const values = await enterSecrets(ctx, root, profile.provider, profile.credential);
+    if (!values) return false;
+    await saveProviderSecrets(profile.provider, values, profile.credential);
+    ctx.ui.notify('Saved key for ' + name + '. Profile settings and authorization are unchanged. Nothing was created or started.', 'info');
+    return true;
+  }
   if (selected === 'Edit provider') return editProfile(ctx, root, config, name, projectOnly);
   if (selected === 'Switch active provider') {
     if (name === config.active) return false;

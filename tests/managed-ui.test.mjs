@@ -5,8 +5,9 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createRerouteTool, panel } from '../dist/pi.js';
-import { defaults, loadConfig, saveConfig, authorizeProject, userConfigPath } from '../dist/config.js';
+import { defaults, loadConfig, saveConfig, saveUserConfig, authorizeProject, userConfigPath } from '../dist/config.js';
 import { secretFile } from '../dist/auth.js';
+import { hash } from '../dist/util.js';
 
 const isolated=await mkdtemp(join(tmpdir(),'reroute-managed-ui-isolation-'));
 process.env.XDG_CONFIG_HOME=join(isolated,'config');
@@ -62,7 +63,7 @@ test('Pi managed onboarding uses one non-secret settings editor and explicit aut
  const saved=(await loadConfig(root)).config.profiles.cloud;
  assert.equal(saved.id,'auto');assert.equal(saved.credential,'gift-account');assert.equal(saved.managed.authorized,true);assert.equal(edited,1);assert.equal(confirmed,1);
  assert.match(messages.join(' '),/still needs a key/,'a profile saved without a key must say so instead of claiming success');
- assert.match(messages.join(' '),/Configure in Pi/);
+ assert.match(messages.join(' '),/Enter missing API key/);
 });
 test('compute settings cannot smuggle an API key into project configuration',async t=>{
  const {root,config}=await project(t);await saveConfig(root,config);
@@ -77,15 +78,18 @@ test('Pi configures in-panel first and keeps the terminal wizard as an explicit 
  const notices=[];const ui=choices=>({select:async()=>choices.shift(),notify:text=>notices.push(text),input:async()=>{throw Error('No unmasked credential inputs');},confirm:async()=>{throw Error('No spending authorization on help');}});
  await panel({cwd:root,hasUI:true,ui:ui(['Advanced terminal setup'])});
  await saveConfig(root,config);
- await panel({cwd:root,hasUI:true,ui:ui(['Manage providers','Configure providers / API keys (masked terminal)','Close'])});
+ await panel({cwd:root,hasUI:true,ui:ui(['Manage providers','Advanced terminal setup','Close'])});
  assert.equal(notices.length,2);
  for(const text of notices){assert.match(text,/bin\/reroute\.mjs/);assert.match(text,/--cwd/);assert.ok(text.includes(root));assert.match(text,/Advanced\/custom setup only/);assert.match(text,/Everyday setup needs no terminal/);}
  assert.equal((await loadConfig(root)).config.active,config.active);
 });
 test('in-panel onboarding hides the key, writes it outside the project and defaults spending to unauthorized',async t=>{
  const {root}=await project(t);
- const notices=[];const answers=['Configure in Pi (recommended, hidden key input)','Daytona (automatic Sandbox)'];
- const ui={select:async()=>answers.shift(),input:async()=>{throw Error('No unmasked credential inputs');},
+ const notices=[];let spendingPrompts=0;const answers=['Configure in Pi (recommended, hidden key input)','Daytona (automatic Sandbox)'];
+ const ui={select:async(title,items)=>{
+  if(title.startsWith('SPENDING')){spendingPrompts++;assert.match(items[0],/^No/);return items[0];}
+  return answers.shift();
+ },input:async()=>{throw Error('No unmasked credential inputs');},
   notify:s=>notices.push(s),editor:async()=>undefined,
   // Simulates the hidden-input component: the host only ever renders a mask, never the value.
   custom:async factory=>{
@@ -99,8 +103,9 @@ test('in-panel onboarding hides the key, writes it outside the project and defau
    component.handleInput('\r');
    return result;
   },
-  confirm:async(title)=>!/SPENDING — authorize/.test(title)};
+  confirm:async()=>true};
  await panel({cwd:root,hasUI:true,ui});
+ assert.equal(spendingPrompts,1);
  const saved=(await loadConfig(root)).config;
  assert.equal(saved.active,'daytona');
  assert.equal(saved.profiles.daytona.managed.authorized,false,'No authorization prompt answered yes');
@@ -112,10 +117,12 @@ test('in-panel onboarding hides the key, writes it outside the project and defau
 test('hidden input edits by cursor, keeps graphemes whole and only ever renders a mask',async t=>{
  const {root}=await project(t);
  await rm(userConfigPath(),{force:true});
- const answers=['Configure in Pi (recommended, hidden key input)','SSH — your own server (no API key)'];
- const notices=[];
- const ui={select:async()=>answers.shift(),input:async()=>'me@example.test',notify:s=>notices.push(s),editor:async()=>undefined,confirm:async()=>true,
+ await rm(secretFile('daytona'),{force:true});
+ const answers=['Configure in Pi (recommended, hidden key input)','Daytona (automatic Sandbox)'];
+ const notices=[];let inputs=0;
+ const ui={select:async(title,items)=>title.startsWith('SPENDING')?items[0]:answers.shift(),input:async()=>{throw Error('No unmasked credential inputs');},notify:s=>notices.push(s),editor:async()=>undefined,confirm:async()=>true,
   custom:async factory=>{
+   inputs++;
    let result;const component=await factory({requestRender:()=>{}},{fg:(_c,s)=>s},undefined,value=>{result=value;}),
     render=()=>component.render(60).join('\n');
    const type=text=>{for(const ch of text)component.handleInput(ch);};
@@ -138,6 +145,8 @@ test('hidden input edits by cursor, keeps graphemes whole and only ever renders 
    return result;
   }};
  await panel({cwd:root,hasUI:true,ui});
+ assert.equal(inputs,1,'the hidden input assertions must execute');
+ assert.equal(JSON.parse(await readFile(secretFile('daytona'),'utf8')).DAYTONA_API_KEY,'Zabc!');
 });
 test('onboarding reuses an already-saved named account instead of demanding the key again',async t=>{
  const {root}=await project(t);
@@ -147,7 +156,7 @@ test('onboarding reuses an already-saved named account instead of demanding the 
  await writeFile(secretFile('daytona'),JSON.stringify({DAYTONA_API_KEY:'fixture-already-saved'}),{mode:0o600});
  const answers=['Configure in Pi (recommended, hidden key input)','Daytona (automatic Sandbox)','Close'];
  const notices=[],prompts=[];
- const ui={select:async()=>answers.shift(),input:async()=>{throw Error('no text input expected');},
+ const ui={select:async(title,items)=>title.startsWith('SPENDING')?items[0]:answers.shift(),input:async()=>{throw Error('no text input expected');},
   // A saved key must never open the hidden input again.
   custom:async()=>{throw Error('saved key must not be re-entered');},
   editor:async()=>undefined,confirm:async title=>{prompts.push(title);return true;},notify:s=>notices.push(s)};
@@ -188,21 +197,184 @@ test('a saved credential account becomes a working profile without a terminal or
  const dir=dirname(secretFile('daytona'));
  await mkdir(dir,{recursive:true,mode:0o700});
  await writeFile(secretFile('daytona'),JSON.stringify({DAYTONA_API_KEY:'fixture-not-for-output'}),{mode:0o600});
- const notices=[],texts=[];let authorization=false;
+ const notices=[],texts=[];
  const ui={input:async()=>{throw Error('No unmasked credential inputs');},
   custom:async()=>{throw Error('An existing saved account needs no key entry');},
   notify:s=>notices.push(s),editor:async()=>undefined,
-  confirm:async(title,text)=>{texts.push(text);if(/SPENDING — authorize/.test(title))authorization=true;return true;}};
+  confirm:async(title,text)=>{texts.push(text);return true;}};
  // The account picker is the second select call, so replay the first-run menu then the picker.
  const choices=['Use a saved credential account','daytona — saved account: daytona'];
- await panel({cwd:root,hasUI:true,ui:{...ui,select:async()=>choices.shift()}});
+ let spendingPrompts=0;
+ await panel({cwd:root,hasUI:true,ui:{...ui,select:async(title,items)=>{
+  if(title.startsWith('SPENDING')){spendingPrompts++;assert.match(items[0],/^No/);assert.match(items[1],/^Yes/);return items[1];}
+  return choices.shift();
+ }}});
  const saved=(await loadConfig(root)).config;
  assert.equal(saved.active,'daytona');
  assert.equal(saved.profiles.daytona.credential,'daytona');
  assert.equal(saved.profiles.daytona.id,'auto');
- assert.equal(saved.profiles.daytona.managed.authorized,authorization);
+ assert.equal(spendingPrompts,1);
+ assert.equal(saved.profiles.daytona.managed.authorized,true);
  assert.match(notices.join(' '),/Saved daytona/);
  assert.ok(!JSON.stringify(saved).includes('fixture-not-for-output'));
  const configText=await readFile(userConfigPath(),'utf8');
  assert.ok(!configText.includes('fixture-not-for-output'));
+});
+
+for(const [label,chunks,expected] of [
+ ['bracketed paste',['\x1b[200~fixture-pasted-key\x1b[201~'],'fixture-pasted-key'],
+ ['split paste',['\x1b[200~fixture-','split-key\x1b[201~'],'fixture-split-key'],
+ ['Kitty printable',['\x1b[97u','\x1b[98u'],'ab'],
+])test('hidden input accepts '+label+' without rendering plaintext',async t=>{
+ const {root}=await project(t);
+ await rm(userConfigPath(),{force:true});await rm(secretFile('daytona'),{force:true});
+ const choices=['Configure in Pi (recommended, hidden key input)','Daytona (automatic Sandbox)','Close'];
+ let inputs=0;
+ await panel({cwd:root,hasUI:true,ui:{
+  select:async(title,items)=>title.startsWith('SPENDING')?items[0]:choices.shift(),confirm:async()=>true,
+  notify:text=>assert.ok(!text.includes(expected)),input:async()=>{throw Error('No unmasked credential inputs');},
+  custom:async factory=>{
+   inputs++;let result;
+   const component=await factory({requestRender(){}},{fg:(_c,s)=>s},undefined,value=>{result=value;});
+   for(const chunk of chunks){
+    component.handleInput(chunk);
+    for(const width of [20,80])assert.ok(component.render(width).every(line=>!line.includes(expected)));
+   }
+   component.handleInput('\r');assert.equal(result,expected);return result;
+  },
+ }});
+ assert.equal(inputs,1);
+ const saved=(await loadConfig(root)).config;
+ assert.equal(saved.profiles.daytona.managed.authorized,false);
+ assert.ok(!JSON.stringify(saved).includes(expected));
+ assert.equal(JSON.parse(await readFile(secretFile('daytona'),'utf8')).DAYTONA_API_KEY,expected);
+});
+
+test('cancelling spending selection writes neither a profile nor credentials',async t=>{
+ const {root}=await project(t);await rm(userConfigPath(),{force:true});
+ const choices=['Configure in Pi (recommended, hidden key input)','Modal (automatic Sandbox)'];
+ let spendingPrompts=0;
+ await panel({cwd:root,hasUI:true,ui:{
+  select:async(title)=>{if(title.startsWith('SPENDING')){spendingPrompts++;return undefined;}return choices.shift();},
+  confirm:async()=>true,notify(){},custom:async()=>{throw Error('cancelled setup must not request a key');},
+ }});
+ assert.equal(spendingPrompts,1);assert.equal((await loadConfig(root)).config,undefined);
+ await assert.rejects(readFile(secretFile('modal')),/ENOENT/);
+});
+
+test('saved E2B credentials are adopted with an existing sandbox ID, never a managed policy',async t=>{
+ const {root}=await project(t);await rm(userConfigPath(),{force:true});
+ await mkdir(dirname(secretFile('e2b')),{recursive:true,mode:0o700});
+ await writeFile(secretFile('e2b'),JSON.stringify({E2B_API_KEY:'fixture-saved-e2b'}),{mode:0o600});
+ const choices=['Use a saved credential account','e2b — saved account: e2b','Close'];
+ let idPrompts=0;const notices=[];
+ await panel({cwd:root,hasUI:true,ui:{
+  select:async(_title,items)=>{const choice=choices.shift();if(choice)assert.ok(items.includes(choice));return choice;},
+  input:async title=>{assert.match(title,/Existing E2B sandbox ID/);idPrompts++;return 'existing-e2b';},
+  confirm:async()=>{throw Error('E2B must not ask for managed settings or spending');},
+  custom:async()=>{throw Error('saved key must not be requested again');},notify:text=>notices.push(text),
+ }});
+ assert.equal(idPrompts,1);
+ assert.deepEqual((await loadConfig(root)).config.profiles.e2b,{provider:'e2b',id:'existing-e2b',credential:'e2b'});
+ assert.ok(!notices.join(' ').includes('fixture-saved-e2b'));
+});
+
+test('existing global SSH configuration can add a cloud provider through hidden onboarding',async t=>{
+ const {root}=await project(t);
+ const ssh={provider:'ssh',id:'existing-server'};
+ await saveUserConfig({...defaults(),active:'ssh',profiles:{ssh}});
+ await rm(secretFile('daytona'),{force:true});
+ const choices=['Manage providers','Configure in Pi (recommended, hidden key input)','Daytona (automatic Sandbox)','Close'];
+ let inputs=0;
+ await panel({cwd:root,hasUI:true,ui:{
+  select:async(title,items)=>{if(title.startsWith('SPENDING'))return items[0];const choice=choices.shift();if(choice)assert.ok(items.includes(choice));return choice;},
+  confirm:async()=>true,input:async()=>{throw Error('no plaintext key entry');},notify(){},
+  custom:async factory=>{
+   inputs++;let result;const component=await factory({requestRender(){}},{fg:(_c,s)=>s},undefined,value=>{result=value;});
+   component.handleInput('\x1b[200~fixture-added-key\x1b[201~');component.handleInput('\r');return result;
+  },
+ }});
+ const saved=(await loadConfig(root)).config;
+ assert.equal(inputs,1);assert.deepEqual(saved.profiles.ssh,ssh);
+ assert.equal(saved.active,'daytona');assert.equal(saved.profiles.daytona.managed.authorized,false);
+ await assert.rejects(readFile(join(root,'.reroute.json')),/ENOENT/);
+});
+
+for(const projectOnly of [false,true])test('an existing '+(projectOnly?'project':'global')+' profile can receive its missing named key without changing settings',async t=>{
+ const {root,config}=await project(t);await rm(userConfigPath(),{force:true});await rm(secretFile('gift-account'),{force:true});
+ if(projectOnly)await saveConfig(root,config);else await saveUserConfig(config);
+ const before=JSON.stringify((await loadConfig(root)).config);
+ const choices=[...(projectOnly?['Project overrides']:[]),'Manage providers','Enter missing API key (hidden input)','cloud','Close'];
+ let inputs=0;
+ await panel({cwd:root,hasUI:true,ui:{
+  select:async(_title,items)=>{const choice=choices.shift();if(choice)assert.ok(items.includes(choice));return choice;},notify(){},
+  confirm:async()=>{throw Error('key entry must not change spending or project consent');},
+  custom:async factory=>{
+   inputs++;let result;const component=await factory({requestRender(){}},{fg:(_c,s)=>s},undefined,value=>{result=value;});
+   component.handleInput('fixture-profile-key');component.handleInput('\r');return result;
+  },
+ }});
+ assert.equal(inputs,1);assert.equal(JSON.stringify((await loadConfig(root)).config),before);
+ assert.equal(JSON.parse(await readFile(secretFile('gift-account'),'utf8')).DAYTONA_API_KEY,'fixture-profile-key');
+ if(projectOnly)await assert.rejects(readFile(userConfigPath()),/ENOENT/);
+});
+
+test('project-only onboarding retains project settings and leaves global defaults untouched',async t=>{
+ const {root}=await project(t);
+ const global={...defaults(),active:'ssh',profiles:{ssh:{provider:'ssh',id:'global-server'}}};
+ await saveUserConfig(global);
+ await saveConfig(root,{...global,mode:'local',timeoutSeconds:600});
+ const before=await readFile(userConfigPath(),'utf8');
+ await mkdir(dirname(secretFile('e2b')),{recursive:true,mode:0o700});
+ await writeFile(secretFile('e2b'),JSON.stringify({E2B_API_KEY:'fixture-project-e2b'}),{mode:0o600});
+ const choices=['Project overrides','Manage providers','Configure in Pi (recommended, hidden key input)','E2B (existing sandbox ID)','Close'];
+ await panel({cwd:root,hasUI:true,ui:{
+  select:async(_title,items)=>{const choice=choices.shift();if(choice)assert.ok(items.includes(choice));return choice;},
+  input:async()=> 'project-sandbox',notify(){},confirm:async()=>true,
+  custom:async()=>{throw Error('reuse the existing E2B credential');},
+ }});
+ const saved=(await loadConfig(root)).config;
+ assert.equal(saved.active,'e2b');assert.equal(saved.mode,'local');assert.equal(saved.timeoutSeconds,600);
+ assert.deepEqual(saved.profiles.ssh,global.profiles.ssh);
+ assert.equal(await readFile(userConfigPath(),'utf8'),before);
+});
+
+test('cancelling the second Modal credential leaves the first credential and profile unwritten',async t=>{
+ const {root}=await project(t);await rm(userConfigPath(),{force:true});await rm(secretFile('modal'),{force:true});
+ const choices=['Configure in Pi (recommended, hidden key input)','Modal (automatic Sandbox)'];
+ let inputs=0;
+ await panel({cwd:root,hasUI:true,ui:{
+  select:async(title,items)=>title.startsWith('SPENDING')?items[0]:choices.shift(),confirm:async()=>true,notify(){},
+  custom:async factory=>{
+   let result;const component=await factory({requestRender(){}},{fg:(_c,s)=>s},undefined,value=>{result=value;});
+   if(++inputs===1){component.handleInput('fixture-modal-token-id');component.handleInput('\r');}
+   else component.handleInput('\x1b');
+   return result;
+  },
+ }});
+ assert.equal(inputs,2);assert.equal((await loadConfig(root)).config,undefined);
+ await assert.rejects(readFile(secretFile('modal')),/ENOENT/);
+});
+
+for(const action of ['Configure in Pi (recommended, hidden key input)','Use a saved credential account'])
+for(const [provider,state] of [['daytona','unknown'],['modal','destroyed']])test(action+' preserves '+provider+' resources and retained storage ('+state+')',async t=>{
+ const {root}=await project(t);
+ const current={...profile(),provider,credential:'original-account'};
+ await saveUserConfig({...defaults(),active:provider,profiles:{[provider]:current}});
+ await mkdir(dirname(secretFile(provider)),{recursive:true,mode:0o700});
+ const keys=provider==='modal'?{MODAL_TOKEN_ID:'fixture-id',MODAL_TOKEN_SECRET:'fixture-secret'}:{DAYTONA_API_KEY:'fixture-owned-key'};
+ await writeFile(secretFile(provider),JSON.stringify(keys),{mode:0o600});
+ const ledger=join(process.env.REROUTE_STATE_DIR,'cloud',hash(provider+'\0original-account').slice(0,32)+'.json');
+ await mkdir(dirname(ledger),{recursive:true,mode:0o700});
+ await writeFile(ledger,JSON.stringify({resources:{owned:{name:'owned',owner:'fixture-owner',profile:{...current,id:'owned-sandbox',cacheVolume:'retained-volume'},state}}}));
+ t.after(()=>rm(ledger,{force:true}));
+ const before=await readFile(userConfigPath(),'utf8');
+ const choices=['Manage providers',action,action.startsWith('Configure')?(provider==='modal'?'Modal (automatic Sandbox)':'Daytona (automatic Sandbox)'):provider+' — saved account: '+provider,'Close'];
+ const notices=[];
+ await panel({cwd:root,hasUI:true,ui:{
+  select:async(_title,items)=>{const choice=choices.shift();if(choice)assert.ok(items.includes(choice));return choice;},
+  confirm:async()=>{throw Error('must refuse before replacing a managed profile');},notify:text=>notices.push(text),
+ }});
+ assert.match(notices.join(' '),/Keep this profile\/account reference/);
+ assert.equal(await readFile(userConfigPath(),'utf8'),before);
 });
