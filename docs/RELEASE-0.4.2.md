@@ -35,7 +35,7 @@ The Harness adapter is installed only through the pinned preview tarball flow in
 
 `npm run verify` (strict typecheck, build, full offline/component suite, CLI smoke) and the packed clean install pass locally on Node 24 with npm 11. Production dependency audit remains **3 moderate / 0 high / 0 critical**; the development/host tree keeps the disclosed high findings from the pinned Pi and Harness SDK lines and is not a clean full-tree audit. See [dependency security](DEPENDENCY-SECURITY.md) for advisory detail and upgrade conditions.
 
-CI covers Node 22/24 × npm 11/12 on Linux, real localhost SSH/rsync, real Pi/AFT coexistence, and a limited Windows job. CI success and an uploaded tarball are not publication: availability is determined by the [npm registry](https://www.npmjs.com/package/@onedotmint/reroute/v/0.4.2). Publication is manual from the verified tarball, and no automated release workflow or GitHub Release is introduced.
+CI covers Node 22/24 × npm 11/12 on Linux, real localhost SSH/rsync, real Pi/AFT coexistence, and a limited Windows job. CI success and an uploaded tarball are not publication: availability is determined by the [npm registry](https://www.npmjs.com/package/@onedotmint/reroute/v/0.4.2). Publication was manual from the verified tarball: npm `latest` is 0.4.2, and the `v0.4.2` GitHub Release attaches that same tarball. No automated publish or release workflow is introduced.
 
 ### Limits
 
