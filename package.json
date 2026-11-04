@@ -1,6 +1,6 @@
 {
   "name": "@onedotmint/reroute",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Keep Pi or DeepSeek Harness and source local; offload build, test and compute through native remote tools",
   "keywords": [
     "pi-package",

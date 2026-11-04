@@ -38,7 +38,7 @@ export const HELP = `Reroute 0.4 - local source, native remote compute
   reroute resource stop|destroy|recover --yes
   reroute resource resume --yes --allow-cost
   Pi-native extension install:
-    pi install npm:@onedotmint/reroute@0.4.0  (optional project install: add -l)
+    pi install npm:@onedotmint/reroute@0.4.2  (optional project install: add -l)
     pi list -l / pi remove -l <source> / pi update --extensions
 
 Global: --cwd DIR. Setup: --name NAME --root /remote/path --port N
@@ -72,7 +72,7 @@ export async function main(argv=process.argv.slice(2)): Promise<void> {
     if(v.version){console.log(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version);return;}
     if(v.help||!command){console.log(HELP);return;}
     if(command==='setup'){const config=await setup(cwd,{project:v.project,advanced:v.advanced,nonInteractive:v['non-interactive'],provider:v.provider,id:v.id,name:v.name,root:v.root,port:v.port,identity:v.identity,app:v.app,tasks:v.tasks,noPi:v['no-pi'],ignoreLegacy:v['ignore-legacy'],managed:v.managed,credential:v.credential,image:v.image,cpu:v.cpu,memory:v.memory,preset:v.preset,authorize:v.authorize,monthlyUsd:v['monthly-usd'],maxTaskUsd:v['max-task-usd'],cpuHourUsd:v['cpu-hour-usd'],memoryHourUsd:v['memory-hour-usd'],storageMonthUsd:v['storage-month-usd'],idleMinutes:v['idle-minutes'],maxCpu:v['max-cpu'],maxMemory:v['max-memory']});if(v['non-interactive'])output({saved:true,scope:v.project?'project':'global',active:config.active,pi:'managed-by-native-pi'});return;}
-    if(command==='pi')throw new Error('Reroute no longer writes Pi extension files. Install the native Pi package with: pi install npm:@onedotmint/reroute@0.4.0  (optional project install: add -l)');
+    if(command==='pi')throw new Error('Reroute no longer writes Pi extension files. Install the native Pi package with: pi install npm:@onedotmint/reroute@0.4.2  (optional project install: add -l)');
     if(command==='doctor'){const r=await doctor(cwd,v.connect);output(r);process.exitCode=r.ok?0:1;return;}
     if(command==='credentials'){
       if(!a[1]||a[1]==='status'){

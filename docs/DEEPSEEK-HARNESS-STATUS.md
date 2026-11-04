@@ -2,7 +2,7 @@
 
 **状态：WIP 预览，尚不可正式启用或用于付费任务。**
 
-分支：`feat/deepseek-harness-preview`。基于主分支 `d24081d`，已有检查点提交 `2b1914c`；本次提交保存其后的 P1/P2 修复和 PTC 取消恢复验证。本轮不合并主分支、不发布 npm、不创建 Release，包版本仍为 `0.4.1`。按用户最新要求，本次提交不带跳过 CI 标记，推送后由 GitHub Actions 自动验证；CI 结果待确认。
+分支：`feat/deepseek-harness-preview`，已合并回主分支并以 **0.4.2** 发布。检查点 `2b1914c` 保存 P1/P2 修复和 PTC 取消恢复验证；0.4.2 只是把该适配器随包分发，**不代表已完成验收**，仍为 WIP 预览。以下内容是发布前的检查点记录，版本号和 tarball 名称保留原样，不是 0.4.2 的重新测量。
 
 ## 已完成
 
@@ -39,7 +39,7 @@ npm run test:dsh
 
 SDK 来自宿主而非在 profile 内另装一份；安装/卸载均在临时 HOME/DSH_HOME 中完成，真实用户 profile 和凭据配置未改。安装集成的可复现测试已在先前检查点提交，新增 PTC 取消恢复测试随本次提交保存；本机原始 JSON 证据在忽略目录 `.artifacts/dsh-integration.json`，不属于 Git 分支内容。
 
-本轮实际重新打包并通过安装验证的 tarball 如下（含 P1/P2 实现修复，在本轮最终状态文档更新前构建）；它在提交前从非干净工作区构建，不是本次提交的精确打包产物，也不是发布或完整 clean-consumer 验收，版本号不是源码身份。产物和安装结果位于忽略目录 `.artifacts/onedotmint-reroute-0.4.1.tgz`、`.artifacts/dsh-integration.json`：
+该检查点实际重新打包并通过安装验证的 tarball 如下（含 P1/P2 实现修复）；它在提交前从非干净工作区构建，不是提交的精确打包产物，也不是发布或完整 clean-consumer 验收，版本号不是源码身份。0.4.2 的独立打包校验见 [0.4.2 发布说明](RELEASE-0.4.2.md)。产物和安装结果位于忽略目录 `.artifacts/onedotmint-reroute-0.4.1.tgz`、`.artifacts/dsh-integration.json`：
 
 ```text
 onedotmint-reroute-0.4.1.tgz

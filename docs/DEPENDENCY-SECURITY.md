@@ -2,7 +2,7 @@
 
 ## Scope and decisions
 
-The governance change in PR #5 kept `@onedotmint/reroute` at **0.4.0**, as one CLI + Pi extension package, without publishing it. The separately authorized [0.4.1 patch](RELEASE-0.4.1.md) prepares these fixes for npm distribution. Neither change alters credentials/configuration formats or authorizes cloud work. All cloud compatibility evidence for this patch is offline contract/type checking, not a new paid/live-service qualification.
+The governance change in PR #5 kept `@onedotmint/reroute` at **0.4.0**, as one CLI + Pi extension package, without publishing it. The separately authorized 0.4.1 patch prepared these fixes for npm distribution, and [0.4.2](RELEASE-0.4.2.md) ships them unchanged. Neither change alters credentials/configuration formats or authorizes cloud work. All cloud compatibility evidence for this patch is offline contract/type checking, not a new paid/live-service qualification.
 
 - **Repository:** `package-lock.json` v3, committed; development and CI use `npm ci --ignore-scripts`. No floating CI dependency resolution for Reroute's own tree.
 - **Publication:** no `npm-shrinkwrap.json` and no package lock in the tarball. npm 12 no longer honors shrinkwrap, including in dependency tarballs. Removing it is not a security fix by itself: the manifest must also admit safe production dependencies.

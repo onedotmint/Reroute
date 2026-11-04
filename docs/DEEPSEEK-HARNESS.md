@@ -1,6 +1,6 @@
 # DeepSeek Harness native integration
 
-**Status: WIP checkpoint, not for real projects or paid tasks; package version remains `0.4.1`.** The two known approval-wait races have targeted fixes; full acceptance remains pending; see [current status and blockers](DEEPSEEK-HARNESS-STATUS.md). The registry's existing `0.4.1` is not evidence that this feature is published. [README](../README.md) retains Pi installation and release-publication guidance; Pi's tools, `/reroute` panel and source-only loading remain supported.
+**Status: WIP preview shipped in `0.4.2`, not for real projects or paid tasks.** The two known approval-wait races have targeted fixes; full acceptance remains pending; see [current status and blockers](DEEPSEEK-HARNESS-STATUS.md). Distribution in the npm package is not qualification. [README](../README.md) retains Pi installation and release-publication guidance; Pi's tools, `/reroute` panel and source-only loading remain supported.
 
 ## Compatibility and packaging
 
@@ -13,7 +13,7 @@ One npm package, `@onedotmint/reroute`, serves both hosts:
 - `dsh.bundle.patch` points to the shipped `cordis.patch.yml`, which activates `@onedotmint/reroute/dsh`.
 - Harness/Cordis SDKs are supplied by the host, with pinned development dependencies for compilation; they are **not production dependencies** that install a second Harness into Pi/CLI installations. No install-time build hook is required.
 
-The [feasibility investigation](DEEPSEEK-HARNESS-FEASIBILITY.md) records earlier SDK/fixture probes, not completed integration acceptance. Current verification belongs in [DELIVERY](../DELIVERY.md#deepseek-harness--unreleased-current-build).
+The [feasibility investigation](DEEPSEEK-HARNESS-FEASIBILITY.md) records earlier SDK/fixture probes, not completed integration acceptance. Current verification belongs in [DELIVERY](../DELIVERY.md#deepseek-harness--042-preview).
 
 ## Install the current build
 
@@ -24,8 +24,8 @@ cd /path/to/Reroute
 npm run build
 npm pack
 # Use an explicit Harness profile:
-dsh plugin --profile web add ./onedotmint-reroute-0.4.1.tgz
-npm install -g ./onedotmint-reroute-0.4.1.tgz
+dsh plugin --profile web add ./onedotmint-reroute-0.4.2.tgz
+npm install -g ./onedotmint-reroute-0.4.2.tgz
 ~~~
 
 Use the actual filename emitted by `npm pack`. The unchanged version number does not identify the source revision; retain the tarball's source identity/integrity when recording acceptance. DSH consumes the compiled entry, unlike Pi's existing source-only Git installation.
@@ -112,4 +112,4 @@ On unload, the plugin explicitly aborts and awaits operations it owns before com
 
 ## Acceptance limits
 
-The current Linux / Node 24 working tree passed strict typecheck/build, 51 Harness component checks (including 15 added approval-wait regressions), and 59 focused Pi/config checks. The current implementation was rebuilt and repacked; real bundle install/native/PTC/remove integration passed (1/1), exercising refusal/status paths without a Provider. Two additional real Node PTC subprocess/bridge tests passed (2/2) with the checkout adapter, real engine and mock Providers, covering nested-call and outer-call cancellation followed by live-Session recovery. These are separate fixture layers: packed integration does not execute a Provider; PTC cancellation uses injected mock Providers, not the installed tarball or a real model loop. Per user request, the full suite and comprehensive clean-consumer package gate were not run. These checks are not real Agent/model-selection, standard Web/Desktop UI, Windows or paid-cloud/billing acceptance. See [checkpoint status](DEEPSEEK-HARNESS-STATUS.md), [DELIVERY](../DELIVERY.md#deepseek-harness--unreleased-current-build), and the [engineering contract](../specs/engineering/harness-tool-ownership.md).
+For 0.4.2, the full `npm test` suite passed (368 passed / 0 failed / 2 skipped) and the packed tarball was installed in a clean prefix. Earlier targeted checks passed: 51 Harness component checks (including 15 added approval-wait regressions) and 59 focused Pi/config checks; real bundle install/native/PTC/remove integration (1/1) exercising refusal/status paths without a Provider; and two real Node PTC subprocess/bridge tests (2/2) with the checkout adapter, real engine and mock Providers, covering nested-call and outer-call cancellation followed by live-Session recovery. These are separate fixture layers: packed integration does not execute a Provider; PTC cancellation uses injected mock Providers, not the installed tarball or a real model loop. These checks are not real Agent/model-selection, standard Web/Desktop UI, Windows or paid-cloud/billing acceptance. See [checkpoint status](DEEPSEEK-HARNESS-STATUS.md), [DELIVERY](../DELIVERY.md#deepseek-harness--042-preview), and the [engineering contract](../specs/engineering/harness-tool-ownership.md).

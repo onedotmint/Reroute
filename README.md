@@ -4,14 +4,14 @@
 
 Reroute is an on-demand task offloader, not a remote IDE or a synchronization daemon. A conservative router sends recognized build/test/check/benchmark tasks to the configured provider. Git, file inspection, deployments, ambiguous shell constructs and unknown commands are not automatically offloaded (use the host's ordinary shell tools). Failed remote jobs never silently retry locally.
 
-**Version: 0.4.1.** Dependency-security and npm-packaging patch: production high-risk dependency fixes, repository-only locking, host-provided Pi SDKs and reviewed automatic update PRs. See [0.4.1 release notes](docs/RELEASE-0.4.1.md) and the [remaining dependency findings](docs/DEPENDENCY-SECURITY.md). Publication status is determined by [npm](https://www.npmjs.com/package/@onedotmint/reroute), not by a passing build; no GitHub Release is required. Global-first installation, reusable defaults, per-project consent and packed source transfer from [0.4.0](docs/RELEASE-0.4.0.md) remain supported. Earlier [real-service acceptance](docs/RELEASE-ACCEPTANCE.md) is historical, not new cloud qualification for this patch. Billing and broad fault recovery remain uncertified.
+**Version: 0.4.2.** Provider management, key repair and saved-account reuse from inside the `/reroute` panel, explicit spending authorization that defaults to No, and the DeepSeek Harness adapter shipped as a **preview** entry point in the same package. See [0.4.2 release notes](docs/RELEASE-0.4.2.md) and the [dependency findings](docs/DEPENDENCY-SECURITY.md). Publication status is determined by [npm](https://www.npmjs.com/package/@onedotmint/reroute), not by a passing build; no GitHub Release is required. Global-first installation, reusable defaults, per-project consent and packed source transfer from [0.4.0](docs/RELEASE-0.4.0.md) remain supported. Earlier [real-service acceptance](docs/RELEASE-ACCEPTANCE.md) is historical, not new cloud qualification for this release. Billing and broad fault recovery remain uncertified.
 
 ## Install once as a global native Pi package (recommended)
 
 From WSL2/Linux with Pi and Node.js >= 22.19:
 
 ~~~bash
-pi install npm:@onedotmint/reroute@0.4.1
+pi install npm:@onedotmint/reroute@0.4.2
 cd /path/to/your-project
 pi
 ~~~
@@ -23,14 +23,14 @@ Pi owns package installation, loading, updates and removal. There is no handwrit
 ~~~bash
 pi list
 pi update --extensions
-pi remove npm:@onedotmint/reroute@0.4.1
+pi remove npm:@onedotmint/reroute@0.4.2
 ~~~
 
 **Optional project-only installation:** add `-l` to `pi install` / `pi remove`; Pi records it in `.pi/settings.json` and requires project trust. Use `setup --project` for special project configuration; existing files are not migrated or overwritten by global setup. A global and a project copy may coexist without registering duplicate Reroute tools; keep versions aligned and remove an obsolete copy through Pi. For noninteractive inspection, `pi list --approve` permits reading trusted project settings; `--no-approve` hides them.
 
-For a historical 0.4.0 Git install, use `pi install git:github.com/onedotmint/Reroute@v0.4.0`; this is not the 0.4.1 patch. Use the versioned npm install above for 0.4.1. The Git checkout does not need a built `dist/`: Pi's native TypeScript loader loads `adapters/pi.ts` and source modules directly. For a local checkout, use `pi install /absolute/path/to/Reroute` (add `-l` only for project-only installation). Historical 0.3.x packages do not contain all 0.4.0 changes.
+For a historical 0.4.0 Git install, use `pi install git:github.com/onedotmint/Reroute@v0.4.0`; this is not 0.4.2. Use the versioned npm install above for 0.4.2. The Git checkout does not need a built `dist/`: Pi's native TypeScript loader loads `adapters/pi.ts` and source modules directly. For a local checkout, use `pi install /absolute/path/to/Reroute` (add `-l` only for project-only installation). Historical 0.3.x packages do not contain all 0.4.0 changes.
 
-The npm package is **`@onedotmint/reroute`**, not the unrelated unscoped `reroute`; the CLI command remains **`reroute`**. The npm example pins this release; check registry availability before installing. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `onedotmint-reroute-0.4.1.tgz` for the **optional standalone CLI**; an uploaded CI artifact does not by itself publish to npm or create a GitHub Release.
+The npm package is **`@onedotmint/reroute`**, not the unrelated unscoped `reroute`; the CLI command remains **`reroute`**. The npm example pins this release; check registry availability before installing. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `onedotmint-reroute-0.4.2.tgz` for the **optional standalone CLI**; an uploaded CI artifact does not by itself publish to npm or create a GitHub Release.
 
 ### Optional CLI
 
@@ -38,10 +38,10 @@ The `/reroute` Pi screen configures SSH, Daytona, Modal and existing E2B sandbox
 
 **Ordinary Pi text inputs are not masked.** Use the hidden-input onboarding for keys, never a plain `input`/`editor` field; Reroute's own wizard renders only a mask, never displays or logs the value, and supports cursor movement and pasted keys.
 
-For read-only resource discovery and advanced diagnostics, install the optional CLI from npm. Alternatively, install `./onedotmint-reroute-0.4.1.tgz` from a successful GitHub Actions run:
+For read-only resource discovery and advanced diagnostics, install the optional CLI from npm. Alternatively, install `./onedotmint-reroute-0.4.2.tgz` from a successful GitHub Actions run:
 
 ~~~bash
-npm install -g @onedotmint/reroute@0.4.1
+npm install -g @onedotmint/reroute@0.4.2
 cd /path/to/your-project
 reroute setup
 reroute doctor --connect
@@ -53,26 +53,26 @@ The standalone CLI manages user defaults, explicit project overrides and opt-in 
 
 Earlier Reroute candidates installed `~/.pi/agent/extensions/reroute.ts` globally. Before enabling the new native package, inspect that file. **Only remove it if its first line is `// Reroute v3 owned extension entry`**; leave unowned or modified files untouched. The new installer does not delete any global extensions automatically. Earlier handwritten global/project entries may conflict or still override Bash; native-copy deduplication cannot make those legacy implementations safe. Updating the native package does not retire a separate historical extension. Restart Pi (or reload extensions) after updating; no reinstall is normally needed for an existing branch-based native package. Use the local-checkout installation above to try unreleased work.
 
-## DeepSeek Harness native plugin — unreleased current build
+## DeepSeek Harness native plugin — preview
 
-**WIP checkpoint — do not enable for real projects or paid compute yet.** The two known approval-wait races are fixed with targeted regressions, and real Node PTC cancellation/recovery bridging passed with mock Providers; full acceptance remains pending. See [current status and blockers](docs/DEEPSEEK-HARNESS-STATUS.md).
+**Preview — do not enable for real projects or paid compute yet.** The two known approval-wait races are fixed with targeted regressions, and real Node PTC cancellation/recovery bridging passed with mock Providers; full acceptance remains pending. See [current status and blockers](docs/DEEPSEEK-HARNESS-STATUS.md).
 
 Pi remains supported, including its existing `/reroute` panel and source-only package loading. The same npm package adds `./dsh` → `dist/dsh.js` and a `dsh.bundle.patch` pointing to `cordis.patch.yml`; Harness registers **only `reroute_run` and `reroute_status`**. No new settings panel, Bash interception or Harness background jobs.
 
-**This integration is not published; npm `0.4.1` must not be assumed to include it.** From the current source checkout, build and pack it, then install that actual tarball (the unchanged version in its filename is not proof of feature availability):
+**0.4.2 ships this adapter as a preview; it is not qualified for real projects.** Install the published package, or build and pack this checkout and install that actual tarball:
 
 ~~~bash
 npm run build
 npm pack
-dsh plugin --profile web add ./onedotmint-reroute-0.4.1.tgz
-npm install -g ./onedotmint-reroute-0.4.1.tgz  # CLI from the same build
+dsh plugin --profile web add ./onedotmint-reroute-0.4.2.tgz
+npm install -g ./onedotmint-reroute-0.4.2.tgz  # CLI from the same build
 cd /path/to/your-project
 reroute setup
 # Human: review project root, upload scope, provider/account, scripts and spending policy.
 reroute authorize --yes
 ~~~
 
-After a release containing this integration is actually published, the registry form is `dsh plugin --profile web add @onedotmint/reroute`; do not use it to test this unreleased change. The preview API is pinned to **DSH `0.2.1-rc.5`**, not all 0.2.x. SDKs are host-provided, not production dependencies. Initial fixture evidence is Linux / Node 24 only, not real-model or paid-cloud acceptance.
+The registry form `dsh plugin --profile web add @onedotmint/reroute` obtains this preview only once npm reports 0.4.2 as available. The preview API is pinned to **DSH `0.2.1-rc.5`**, not all 0.2.x. SDKs are host-provided, not production dependencies. Initial fixture evidence is Linux / Node 24 only, not real-model or paid-cloud acceptance.
 
 Every new run additionally needs Harness **`allowed-once`** approval. Policy `never` rejects; missing approval service fails closed. Read-only or active plan mode refuses new runs. The model must not perform setup/authorization on the user's behalf. Existing command eligibility, project consent and budget gates remain unchanged.
 
@@ -80,7 +80,7 @@ Only local Host projects with provable same-file mapping are supported. Both cwd
 
 Status is remotely read-only but may update the local receipt. Revoking execution consent does not block queries of old jobs in the admitted current project; foreign jobs remain inaccessible, and E2B verification stays fail closed. After cancellation, native text retains the Job ID, but Harness removes the canonical value and PTC sees only a cancellation error. Harness-only `reroute_status({})` recovers the latest allocated Job ID for the **current live Session**, still subject to current-project checks. Reload/restart loses that implicit mapping: use `reroute_status({ jobId: "..." })`, or find the ID with `reroute jobs`. Failure/unknown never triggers automatic retry; a local rerun needs user authorization. Unload explicitly aborts and awaits owned calls, but hard process exit does not guarantee remote termination or cloud-resource shutdown.
 
-See [Harness installation and safety contract](docs/DEEPSEEK-HARNESS.md) and [engineering boundaries](specs/engineering/harness-tool-ownership.md). Recorded targeted checks are in [DELIVERY](DELIVERY.md#deepseek-harness--unreleased-current-build); full regression was deferred by request, and historical Pi/cloud results are not Harness acceptance.
+See [Harness installation and safety contract](docs/DEEPSEEK-HARNESS.md) and [engineering boundaries](specs/engineering/harness-tool-ownership.md). Recorded targeted checks are in [DELIVERY](DELIVERY.md#deepseek-harness--preview); full Harness acceptance was not run, and historical Pi/cloud results are not Harness acceptance.
 
 ## Friendly setup and Pi control panel
 

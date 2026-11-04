@@ -28,7 +28,7 @@ The user-facing contract is [DeepSeek Harness native integration](../../docs/DEE
 
 Reroute owns only foreground `reroute_run` and `reroute_status` in Harness. Do not register/override Bash, intercept another tool or process spawning, add a classifier/model request, create a settings panel, or connect to Harness background jobs. Pi retains its own schemas, native progress/envelope, management command/panel and source-only loading. Shared `src/tools.ts` owns host-independent validation, eligibility/refusal, bounded output and run/status semantics; host-specific approval/rendering stays in its adapter. Keep engine/router/provider and cost rules intact, rather than bypassing them with a direct `runRemote` wrapper.
 
-Use the same npm package: preserve `.` and `./pi`, add `./dsh` → `dist/dsh.js`, and ship `dsh.bundle.patch` → `cordis.patch.yml` activating `@onedotmint/reroute/dsh`. Pin preview compatibility to DSH `0.2.1-rc.5`; SDKs are host-provided, not production dependencies or an install-time build. Preserve clean Pi/CLI installation without installing Harness. Current-build tgz installation must be distinguished from registry publication; unchanged `0.4.1` does not imply the published package contains Harness support.
+Use the same npm package: preserve `.` and `./pi`, add `./dsh` → `dist/dsh.js`, and ship `dsh.bundle.patch` → `cordis.patch.yml` activating `@onedotmint/reroute/dsh`. Pin preview compatibility to DSH `0.2.1-rc.5`; SDKs are host-provided, not production dependencies or an install-time build. Preserve clean Pi/CLI installation without installing Harness. Current-build tgz installation must be distinguished from registry publication; shipping `./dsh` in a release does not imply it is qualified for real projects.
 
 ## Admission and immutable scope
 
@@ -62,7 +62,7 @@ Unload must explicitly abort and await owned operations, not merely unregister t
 
 ## Required regression coverage and evidence
 
-Record actual results in [DELIVERY](../../DELIVERY.md#deepseek-harness--unreleased-current-build), not here in advance. Cover:
+Record actual results in [DELIVERY](../../DELIVERY.md#deepseek-harness--042-preview), not here in advance. Cover:
 
 - Native and PTC schema/canonical/rendering behavior, nonzero/timeout/unknown/error, bounded UTF-8 output and receipt persistence failures.
 - Missing caller/mapping/policy, local versus SSH file worlds, immutable root across cwd changes, canonical aliases, nested cwd, out-of-bound ancestor config and Git root, with no upload/provider access on refusal.
