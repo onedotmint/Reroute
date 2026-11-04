@@ -136,14 +136,32 @@ export async function statusTool(jobId: string, options: ToolOptions, inspect = 
   return { details, text, isError: !!error || !confirmed };
 }
 
+/** Only measured values are printed: the model reads text, so a '?' costs context and teaches nothing. */
 export function measured(job: Job): string {
   const m = job.metrics;
   if (!m) return 'Timing not measured';
-  return 'Measured: source ' + (m.inputMs ?? '?') + ' ms; transfer ' + (m.transferMs ?? '?') + ' ms / ' + (m.transferredBytes ?? '?') +
-    ' B; execution ' + (m.executionMs ?? '?') + ' ms; provision ' + (m.provisionMs ?? '?') + ' ms' +
-    '\n  pack ' + (m.packMs ?? '?') + ' ms / ' + (m.archiveBytes ?? '?') + ' B; upload ' + (m.uploadMs ?? '?') + ' ms / ' + (m.uploadedBytes ?? '?') +
-    ' B; remote unpack/verify ' + (m.remoteUnpackMs ?? '?') + '/' + (m.remoteVerifyMs ?? '?') + ' ms' +
-    '\n  cache restore ' + (m.cacheRestoreMs ?? '?') + ' ms / ' + (m.cacheRestoreBytes ?? '?') + ' B; cache save ' + (m.cacheSaveMs ?? '?') + ' ms / ' + (m.cacheSaveBytes ?? '?') +
-    ' B; cleanup/release ' + (m.cleanupMs ?? '?') + '/' + (m.releaseMs ?? '?') + ' ms; download cache: ' +
-    (m.cacheHit === true ? 'archive restored' : m.cacheHit === false ? 'archive not restored' : 'unmeasured');
+  const first: string[] = [], rest: string[] = [];
+  const time = (label: string, ms: number | undefined, bytes?: number) => {
+    if (ms === undefined && bytes === undefined) return;
+    first.push(label + ' ' + (ms === undefined ? '?' : ms) + ' ms' + (bytes === undefined ? '' : ' / ' + bytes + ' B'));
+  };
+  const detail = (label: string, ms: number | undefined, bytes?: number) => {
+    if (ms === undefined && bytes === undefined) return;
+    rest.push(label + ' ' + (ms === undefined ? '?' : ms) + ' ms' + (bytes === undefined ? '' : ' / ' + bytes + ' B'));
+  };
+  time('source', m.inputMs);
+  time('transfer', m.transferMs, m.transferredBytes);
+  time('execution', m.executionMs);
+  time('provision', m.provisionMs);
+  detail('pack', m.packMs, m.archiveBytes);
+  detail('upload', m.uploadMs, m.uploadedBytes);
+  if (m.remoteUnpackMs !== undefined || m.remoteVerifyMs !== undefined)
+    rest.push('remote unpack/verify ' + (m.remoteUnpackMs ?? '?') + '/' + (m.remoteVerifyMs ?? '?') + ' ms');
+  detail('cache restore', m.cacheRestoreMs, m.cacheRestoreBytes);
+  detail('cache save', m.cacheSaveMs, m.cacheSaveBytes);
+  if (m.cleanupMs !== undefined || m.releaseMs !== undefined)
+    rest.push('cleanup/release ' + (m.cleanupMs ?? '?') + '/' + (m.releaseMs ?? '?') + ' ms');
+  if (m.cacheHit !== undefined) rest.push('download cache: ' + (m.cacheHit ? 'archive restored' : 'archive not restored'));
+  if (!first.length && !rest.length) return 'Timing not measured';
+  return ['Measured: ' + first.join('; '), ...(rest.length ? ['  ' + rest.join('; ')] : [])].join('\n');
 }

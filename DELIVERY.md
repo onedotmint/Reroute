@@ -56,14 +56,14 @@ Everything below this table is history, newest last. It records what was true at
 - Project install: `pi install -l git:github.com/onedotmint/Reroute@rebuild/0.3-native` via Pi's actual package manager. Project settings are in `.pi/settings.json` and project trust gates extension loading.
 - The Pi adapter now loads source `src/pi.ts` with Pi's own TypeScript loader; a Git package clone does not need generated `dist/`.
 - `reroute setup` configures the project's `.reroute.json` only; global `installPi` entry-writing was removed. The old `reroute pi install` subcommand is intentionally retired.
-- First `/reroute` invocation in an unconfigured trusted project can create the project's first provider profile. Provider keys must not be entered into unmasked Pi text inputs; masked credential entry remains available via the optional standalone CLI.
+- First `/reroute` invocation in an unconfigured trusted project configures Daytona/Modal in-panel: recommended compute/rates review, separate spending authorization, and a hidden key input that writes only the private 0600 account file. A key already saved on the machine is adopted as a profile with no terminal and no re-entry.
 - Automated acceptance includes source-only Pi loading (without `dist/`), real Pi CLI project-local package install/trust/uninstall tests, and on GitHub branch pushes a full native Pi Git-install smoke test of the exact commit. No user home settings or global extensions are changed in these tests.
 - An earlier owned global extension must be reviewed and manually retired to prevent duplicate registration; nothing deletes unknown Pi extensions automatically.
 - **Manual WSL2 interactive acceptance and all live paid cloud integrations remain unverified.**
 
 ## 0.3 lightweight convergence (this branch)
 
-- Slimmed the Pi profile-management flow rather than adding another configuration service. Shared `validate`/`saveConfig` remain the sole configuration validation/persistence path; both Clack onboarding and Pi use the same project configuration. The masked credential wizard is kept separate because Pi text inputs are not masked.
+- Slimmed the Pi profile-management flow rather than adding another configuration service. Shared `validate`/`saveConfig` remain the sole configuration validation/persistence path; both Clack onboarding and Pi use the same project configuration. Pi's onboarding adds one masked-input component (plain Pi `input`/`editor` remain unmasked) so key entry no longer requires leaving Pi; the Clack wizard stays for SSH/SkyPilot/E2B, existing sandbox IDs and custom specifications.
 - Main `/reroute` menu now contains everyday overview, providers, routing mode, connection check and jobs; lifecycle stop/resume/destroy and key removal moved to **Advanced**. No resource is accessed merely by opening a menu; each potentially costly/destructive action still requires consent.
 - Canceled Pi field editing leaves the existing saved profile untouched; new tests cover cancel, provider switching and Advanced confirmation.
 - Cloud provider expansion frozen. **Daytona has since been verified live** (see the live-acceptance section below); SkyPilot/E2B remain **experimental and LIVE UNVERIFIED**; Modal has since passed the lightweight checks recorded below, not full acceptance. None is removed or silently disabled.

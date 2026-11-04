@@ -1,16 +1,18 @@
 import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from '@earendil-works/pi-ai';
 import { realpath } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shell } from './util.js';
+import { inside, processExec, shell } from './util.js';
 import { activeProfile, defaults, hasLegacy, loadConfig, loadUserConfig, saveUserConfig, saveProjectOverrides, projectAuthorized, authorizeProject, revokeProject, listJobs, validate } from './config.js';
-import { credentialStatus, forgetProviderSecrets } from './auth.js';
+import { credentialStatus, forgetProviderSecrets, saveProviderSecrets, savedAccounts, secretFile, secretNames, type SecretMap } from './auth.js';
 import { discoverExisting } from './discovery.js';
 import { PROVIDERS, type Config, type Profile, type ProviderId, type Job } from './types.js';
 import { runRemote, resourceAction, inspectJob } from './engine.js';
 import { authorizationHelp, measured, runTool, statusTool, type ToolReport } from './tools.js';
 import { doctor } from './doctor.js';
-import { cloudPlan, cloudSummary, presets } from './resources.js';
+import { cloudPlan, cloudSummary, defaultPolicy, presets } from './resources.js';
+import { nextStep } from './setup.js';
 import { TOOLCHAIN_IMAGE } from './toolchain.js';
 import { HISTORY_PREFIX, projectExecutionHints } from './history.js';
 import { inspectEnvironment, type EnvironmentInspection } from './environment.js';
@@ -27,7 +29,7 @@ async function confirmProject(ctx: Pick<ExtensionContext, 'hasUI' | 'ui'>, root:
   if (await projectAuthorized(root, config)) return true;
   if (!ctx.hasUI) return false;
   const profile = activeProfile(config), canonical = await realpath(root);
-  const accepted = await ctx.ui.confirm('Authorize this project for remote execution?',
+  const accepted = await ctx.ui.confirm('SOURCE UPLOAD — allow remote execution for this project?',
     'Canonical project root: ' + canonical + '\nProvider/account: ' + profile.provider + ' / ' + (profile.credential ?? '(environment/native default)') +
     '\nResource: ' + profile.id + '\nSource code will be uploaded. Project scripts and lifecycle hooks are trusted code and will execute remotely without recursive auditing.' +
     '\nRemote compute and retained storage may incur fees; credit is unknown. This project authorization does not replace the managed spending policy. Authorize until revoked or the target changes?', { signal });
@@ -124,9 +126,7 @@ async function editCloudSettings(ctx: ExtensionCommandContext, profile: Profile)
   const modal = profile.provider === 'modal';
   const initial = { credential: profile.credential, app: modal ? profile.app ?? 'reroute' : undefined,
     image: profile.image ?? TOOLCHAIN_IMAGE, compute: profile.compute ?? presets.medium,
-    managed: profile.managed ?? { authorized: false, maxCpu: 8, maxMemoryGiB: 16, monthlyUsd: 3, maxTaskUsd: 0.5,
-      cpuHourUsd: modal ? 0.141912 : 0.0504, memoryGiBHourUsd: modal ? 0.024012 : 0.0162,
-      storageMonthUsd: 0.01, idleMinutes: 5 } };
+    managed: profile.managed ?? defaultPolicy(profile.provider as 'daytona' | 'modal') };
   const text = await ctx.ui.editor('Compute & budget — NO secrets. Review USD rates; credit UNKNOWN. authorized=true permits future paid creation/start. Set a real toolchain image. Modal CPU=physical cores.', JSON.stringify(initial, null, 2));
   if (text === undefined) return false;
   let data;
@@ -134,6 +134,132 @@ async function editCloudSettings(ctx: ExtensionCommandContext, profile: Profile)
   if (!data || typeof data !== 'object' || Object.keys(data).some(key => !['credential','app','image','compute','managed'].includes(key))) throw new Error('Only non-secret compute/budget fields are accepted');
   Object.assign(profile, data);
   if (!profile.managed || !profile.image) throw new Error('Set a toolchain image and explicit managed policy before saving');
+  return true;
+}
+
+/** Mirrors setup's quick defaults; a saved but unreviewed policy is never billed. */
+async function quickProfile(ctx: ExtensionCommandContext, provider: ProviderId, name: string): Promise<Profile | undefined> {
+  const modal = provider === 'modal';
+  const profile: Profile = { provider, credential: name, id: 'auto', image: TOOLCHAIN_IMAGE, compute: { ...presets.small! },
+    managed: defaultPolicy(provider as 'daytona' | 'modal') };
+  if (!await ctx.ui.confirm('Use recommended cloud settings for ' + name + '?',
+    'Provider: ' + provider + (modal ? ' (physical cores)' : ' (vCPU)') + '\nCompute: ' + profile.compute!.cpu + ' CPU / ' + profile.compute!.memoryGiB + ' GiB; image ' + profile.image +
+    '\nLocal estimate budget: $' + profile.managed!.monthlyUsd.toFixed(2) + '/month per account, $' + profile.managed!.maxTaskUsd.toFixed(2) + '/task\nRates: CPU $' + profile.managed!.cpuHourUsd + '/hour, memory $' + profile.managed!.memoryGiBHourUsd + '/GiB-hour\nCredit and actual billing are UNKNOWN. Amounts are local estimates, not hard bill caps.\nNo = nothing saved; custom specifications need reroute setup in a terminal.')) return undefined;
+  profile.managed!.authorized = await ctx.ui.confirm('SPENDING — authorize future paid creation/start for ' + name + '?',
+    'Yes saves an explicit spending authorization: future tasks may create/start managed compute within the estimates above.\nNo saves the profile unauthorized; nothing can be created or started until you authorize it.\nThis is separate from the one-time project consent for uploading source and running it remotely.');
+  return profile;
+}
+/** Input is never echoed: only a mask is rendered, and the value goes straight to the private file. */
+async function maskedInput(ctx: ExtensionCommandContext, title: string): Promise<string | undefined> {
+  return ctx.ui.custom<string | undefined>(async (tui, theme, _keys, done) => {
+    // matchesKey, not literal escapes: kitty protocol sends arrows as CSI u (\x1b[1;1D), so a
+    // hardcoded '\x1b[D' compare silently fails in real terminals.
+    const { matchesKey, Key } = await import('@earendil-works/pi-tui');
+    let chars: string[] = [], cursor = 0;
+    return {
+      render: (width: number) => [theme.fg('accent', title), ' ' + '*'.repeat(Math.min(chars.length, Math.max(0, width - 2))),
+        theme.fg('dim', 'Enter accepts • ←/→ move • Esc cancels • input is not echoed')],
+      invalidate: () => {},
+      handleInput: (data: string) => {
+        if (matchesKey(data, Key.enter)) return done(chars.join(''));
+        if (matchesKey(data, Key.escape)) return done(undefined);
+        if (matchesKey(data, Key.backspace)) { if (cursor > 0) { chars.splice(--cursor, 1); } }
+        else if (matchesKey(data, Key.delete)) chars.splice(cursor, 1);
+        else if (matchesKey(data, Key.left)) cursor = Math.max(0, cursor - 1);
+        else if (matchesKey(data, Key.right)) cursor = Math.min(chars.length, cursor + 1);
+        else if (matchesKey(data, Key.home)) cursor = 0;
+        else if (matchesKey(data, Key.end)) cursor = chars.length;
+        // Graphemes keep IME/emoji/combining sequences whole instead of splitting code units.
+        else if (data && !data.startsWith('\x1b') && !/[\0-\x1f\x7f]/.test(data)) {
+          for (const part of (globalThis.Intl.Segmenter ? [...new globalThis.Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(data)].map(s => s.segment) : [data]))
+            chars.splice(cursor++, 0, part);
+        }
+        tui.requestRender();
+      },
+    };
+  });
+}
+/** Masks at entry and writes only to the private credential file; the value never reaches .reroute.json or a notify. */
+async function enterSecrets(ctx: ExtensionCommandContext, root: string, provider: ProviderId, account: string): Promise<SecretMap | undefined> {
+  const values: SecretMap = {};
+  for (const key of secretNames[provider]) {
+    const entered = await maskedInput(ctx, provider + ' — ' + key + ' (hidden input)');
+    if (!entered?.trim()) return undefined;
+    values[key] = entered.trim();
+  }
+  const git = await processExec('git', ['-C', root, 'rev-parse', '--show-toplevel']).catch(() => undefined);
+  const sourceRoot = await realpath(git?.code === 0 && !git.stdoutTruncated ? git.stdout.trim() : root);
+  if (inside(sourceRoot, resolve(secretFile(account)))) throw new Error('Private credential storage must be outside this project/repository; set XDG_CONFIG_HOME outside it. No key saved.');
+  return values;
+}
+/** A credential file alone is not a profile: adopt a saved account without a terminal or key entry. */
+async function adoptSavedCredentials(ctx: ExtensionCommandContext, root: string, projectOnly = false): Promise<boolean> {
+  const accounts = await savedAccounts(), ready: { provider: ProviderId; account: string }[] = [];
+  for (const provider of PROVIDERS) for (const account of accounts)
+    if (secretNames[provider].length && await credentialStatus(provider, account) !== 'missing') ready.push({ provider, account });
+  if (!ready.length) { ctx.ui.notify('No saved credential account found on this machine. Choose Configure to enter a key in the hidden input.', 'info'); return false; }
+  const labels = ready.map(r => r.provider + ' — saved account: ' + r.account);
+  const picked = await ctx.ui.select('Use a saved credential account (no terminal needed)', labels);
+  if (!picked) return false;
+  const target = ready[labels.indexOf(picked)]!;
+  const profile = await quickProfile(ctx, target.provider, target.account);
+  if (!profile) return false;
+  const base = (await loadUserConfig()) ?? defaults();
+  const config: Config = { ...base, profiles: { ...base.profiles, [target.account]: profile }, active: target.account };
+  validate(config);
+  await saveSettings(root, config, projectOnly);
+  ctx.ui.notify('Saved ' + target.account + ' (' + target.provider + ', no cloud request). ' + nextStep, 'info');
+  return true;
+}
+/** SSH costs nothing and needs no key, so it is offered first; nothing is created or started. */
+async function quickOnboard(ctx: ExtensionCommandContext, root: string, projectOnly = false): Promise<boolean> {
+  const options: { label: string; provider: ProviderId }[] = [
+    { label: 'SSH — your own server (no API key)', provider: 'ssh' },
+    { label: 'Daytona (automatic Sandbox)', provider: 'daytona' },
+    { label: 'Modal (automatic Sandbox)', provider: 'modal' },
+    { label: 'E2B (existing sandbox ID)', provider: 'e2b' },
+  ];
+  const labels = options.map(option => option.label);
+  const choice = await ctx.ui.select('Choose a provider (nothing is created by saving)', labels);
+  if (!choice) return false;
+  const provider = options[labels.indexOf(choice)]!.provider;
+  const base = (await loadUserConfig()) ?? defaults();
+  const name = provider, existing = base.profiles[name];
+  if (existing && !await ctx.ui.confirm('Replace saved profile ' + name + '?', 'Use Add provider in Manage providers to keep both. Nothing remote is changed.')) return false;
+  if (provider === 'ssh') {
+    const host = (await ctx.ui.input('SSH host you already use (alias or user@host)', existing?.id ?? ''))?.trim();
+    if (!host) { ctx.ui.notify('No host entered; nothing saved.', 'info'); return false; }
+    const config: Config = { ...base, profiles: { ...base.profiles, ssh: { provider: 'ssh', id: host } }, active: 'ssh' };
+    validate(config);
+    await saveSettings(root, config, projectOnly);
+    ctx.ui.notify('Saved SSH profile for ' + host + '. No key is stored; your ~/.ssh/config and ssh-agent are used. ' + nextStep, 'info');
+    return true;
+  }
+  // E2B attaches to an existing sandbox, so it needs an ID but no managed policy.
+  let profile: Profile;
+  if (provider === 'e2b') {
+    const id = (await ctx.ui.input('Existing E2B sandbox ID', existing?.id ?? ''))?.trim();
+    if (!id) { ctx.ui.notify('No sandbox ID entered; nothing saved.', 'info'); return false; }
+    profile = { provider, id, credential: name };
+  } else {
+    const managed = await quickProfile(ctx, provider, name);
+    if (!managed) return false;
+    profile = managed;
+  }
+  const config: Config = { ...base, profiles: { ...base.profiles, [name]: profile }, active: name };
+  validate(config);
+  // The profile uses this named account, so ask about THAT store: an unnamed check reports 'missing' while
+  // accounts/NAME.json is already complete, which would demand the key again on every re-run.
+  const saved = await credentialStatus(provider, name);
+  if (saved === 'missing') {
+    const values = await enterSecrets(ctx, root, provider, name);
+    if (!values) { ctx.ui.notify('No key entered; nothing saved.', 'info'); return false; }
+    await saveProviderSecrets(provider, values, name);
+  }
+  // A saved key is used silently: asking to replace it here would just add a confusing extra step.
+  // Rotation lives in reroute setup and Advanced -> Forget saved API key.
+  await saveSettings(root, config, projectOnly);
+  ctx.ui.notify('Saved ' + name + (saved === 'missing' ? '. The key is stored outside this project.' : ' using the key already saved for this account.') + ' ' + nextStep, 'info');
   return true;
 }
 
@@ -204,14 +330,16 @@ async function editProfile(ctx: ExtensionCommandContext, root: string, config: C
   validate(next);
   if (!await ctx.ui.confirm(projectOnly ? 'Save project profile override?' : 'Save global provider defaults?', name + ' | ' + provider + ' | ' + profile.id + (profile.managed?.authorized ? '\nAuthorizes future cloud creation/start within these estimated limits. Credit is UNKNOWN; extra bills remain possible. Project remote authorization is still required.' : '\nNo cloud resources will be created or resumed by this save. Saving credentials is not authentication or project remote authorization.'))) return false;
   await saveSettings(root, next, projectOnly);
-  ctx.ui.notify('Saved ' + name + '. For masked API-key entry, use the optional reroute setup CLI.', 'info');
+  const missingKey = secretNames[provider as ProviderId]?.length && await credentialStatus(provider as ProviderId, profile.credential) === 'missing';
+  ctx.ui.notify('Saved ' + name + '.' + (missingKey
+    ? ' This profile still needs a key: use Configure in Pi (hidden input) or reroute setup, or it will fail closed.'
+    : ' Nothing was created or started.'), 'info');
   return true;
 }
 
 function showSetup(ctx: ExtensionCommandContext, root: string, projectOnly = false): void {
   const command = shell(['node', fileURLToPath(new URL('../bin/reroute.mjs', import.meta.url)), 'setup', '--cwd', root, ...(projectOnly ? ['--project'] : [])]);
-  ctx.ui.notify('Run once in a WSL terminal (not a Pi text field):\n' + command +
-    '\n' + (projectOnly ? 'Project-specific overrides.' : 'Recommended: global user defaults, reused by projects; setup defaults to global scope.') + '\nSpace selects multiple providers. Daytona/Modal credentials are masked; SSH only needs your existing host. Saving credentials is not authentication or project authorization. No cloud creation during setup. Return to /reroute after saving.', 'info');
+  ctx.ui.notify('Advanced/custom setup only. Run in a WSL terminal:\n' + command + '\nEveryday setup needs no terminal: use Configure in Pi.', 'info');
 }
 
 async function manageProfiles(ctx: ExtensionCommandContext, root: string, config: Config, projectOnly = false): Promise<boolean> {
@@ -325,13 +453,14 @@ export async function panel(ctx: ExtensionCommandContext, checked = new Map<stri
         ctx.ui.notify('Legacy Reroute state found. Recover old work before using --ignore-legacy; nothing was overwritten.', 'error');
         return;
       }
-      const choice = await ctx.ui.select('Reroute | No configuration | Global setup recommended', [
-        'Configure Daytona / Modal / SSH (masked terminal)', 'Configure this project', 'How to configure API credentials', 'Close',
+      const choice = await ctx.ui.select('Reroute | No configuration yet', [
+        'Configure in Pi (recommended, hidden key input)', 'Use a saved credential account', 'Configure this project', 'Advanced terminal setup', 'Close',
       ]);
-      if (choice === 'Configure Daytona / Modal / SSH (masked terminal)') { showSetup(ctx, root); return; }
-      if (choice === 'Configure this project') {
+      if (choice === 'Configure in Pi (recommended, hidden key input)') { if (await quickOnboard(ctx, root)) continue; }
+      else if (choice === 'Use a saved credential account') { if (await adoptSavedCredentials(ctx, root)) continue; }
+      else if (choice === 'Configure this project') {
         if (await editProfile(ctx, root, defaults(), undefined, true)) continue;
-      } else if (choice === 'How to configure API credentials') {
+      } else if (choice === 'Advanced terminal setup') {
         showSetup(ctx, root);
       }
       return;
@@ -344,16 +473,16 @@ export async function panel(ctx: ExtensionCommandContext, checked = new Map<stri
     const authorized = await projectAuthorized(canonical, config);
     const jobs = (await listJobs()).filter(j => j.project === canonical);
     const successful = jobs.filter(j => j.status === 'exited' && j.code === 0 && !j.error);
-    const title = 'Reroute | ' + profile.provider + ' (' + config.active + ') | Config: ' + source +
-      '\nProject: ' + canonical + '\nResource: ' + profile.id + ' | Mode: ' + config.mode +
-      '\nCredential source: ' + sources[config.active] + ' (saved is not authenticated)' +
-      '\nConnection (this session): ' + current + ' | Project remote authorization: ' + (authorized ? 'authorized' : 'NOT authorized') +
-      '\nSuccessful actual tasks (local receipts): ' + successful.length + (successful[0] ? ' | latest: ' + successful[0].id : '') +
-      (profile.compute ? '\n' + profile.compute.cpu + ' CPU / ' + profile.compute.memoryGiB + ' GiB' : '') +
-      (profile.managed ? ' | Budget: $' + profile.managed.monthlyUsd + '/month (local estimate; credit unknown)' : '');
+    // Four lines: a long status block pushes the choices off-screen and reads as noise.
+    const consent = authorized ? 'project authorized' : 'PROJECT NOT AUTHORIZED — remote tasks are refused';
+    const title = config.active + (profile.provider === config.active ? '' : ' · ' + profile.provider) + ' · ' + profile.id + ' · ' + config.mode + ' · ' + source +
+      '\n' + consent + ' · connection: ' + current + ' · ' + successful.length + ' successful task(s)' +
+      (profile.compute ? ' · ' + profile.compute.cpu + ' CPU / ' + profile.compute.memoryGiB + ' GiB' : '') +
+      (profile.managed ? ' · $' + profile.managed.monthlyUsd.toFixed(2) + '/month estimate (NOT a bill cap)' : '') +
+      '\nProject: ' + canonical;
     let action = await ctx.ui.select(title, [
-      'Overview', 'Manage providers', 'Compute & budget', 'Check connection', 'Authorize project remote execution', 'Revoke project authorization',
-      'Optional low-cost smoke test', 'Routing mode', 'Project overrides', 'Recent jobs', 'Advanced', 'Close',
+      'Overview', 'Manage providers', 'Compute & budget', authorized ? 'Revoke project remote execution consent' : 'Allow remote execution for this project',
+      'Check connection', 'Optional low-cost smoke test', 'Routing mode', 'Project overrides', 'Recent jobs', 'Advanced', 'Close',
     ]);
     if (!action || action === 'Close') return;
     try {
@@ -393,9 +522,9 @@ export async function panel(ctx: ExtensionCommandContext, checked = new Map<stri
         if (!Object.keys(settings.profiles).length) throw new Error('Configure global providers first, or choose Project overrides for this project.');
         const mode = await ctx.ui.select(projectOnly ? 'Project routing mode' : 'Global default routing mode', ['auto', 'local']);
         if (mode) await saveSettings(root, { ...settings, mode: mode as Config['mode'] }, projectOnly);
-      } else if (action === 'Authorize project remote execution') {
+      } else if (action === 'Allow remote execution for this project') {
         if (await confirmProject(ctx, canonical, config)) ctx.ui.notify('Project authorization saved. No source uploaded and no remote task started. Managed spending policy still applies.', 'info');
-      } else if (action === 'Revoke project authorization') {
+      } else if (action === 'Revoke project remote execution consent') {
         if (await ctx.ui.confirm('Revoke this project remote authorization?', canonical + '\nFuture remote execution will require fresh approval. Running jobs are NOT cancelled.')) {
           await revokeProject(canonical);
           ctx.ui.notify('Project authorization revoked. Existing remote jobs/resources are unchanged.', 'info');
@@ -406,8 +535,12 @@ export async function panel(ctx: ExtensionCommandContext, checked = new Map<stri
         const result = await doctor(ctx.cwd, true);
         const status = String(result.checks.resource ?? 'unavailable');
         checked.set(key, (result.ok ? 'verified: ' : 'not ready: ') + status);
-        ctx.ui.notify('Resource: ' + status + ' | Connection: ' + (result.ok ? 'verified' : 'not ready') +
-          '\nThis connection check is not successful task execution or project authorization. Detailed diagnostics: reroute doctor --connect', result.ok ? 'info' : 'error');
+        // Say what the probe actually proved: a live remote prerequisite run, not a billing or task guarantee.
+        const proof = result.checks.remotePrerequisites ? 'Remote prerequisites ran on the resource: ' + String(result.checks.remotePrerequisites) :
+          result.checks.authentication === 'verified on running resource by this check' ? 'Reached a running resource; no prerequisite command ran.' :
+            String(result.checks.note ?? 'No running resource was contacted; no resume was attempted.');
+        ctx.ui.notify('Resource: ' + status + ' | Connection: ' + (result.ok ? 'verified' : 'not ready') + '\n' + proof +
+          '\nNot proven by this check: task execution, source upload, project authorization, spendable credit. Detailed diagnostics: reroute doctor --connect', result.ok ? 'info' : 'error');
       } else if (action === 'Recent jobs') {
         ctx.ui.notify(jobs.slice(0, 8).map(j => j.id + ' | ' + j.status + ' | ' + j.profile.provider +
           ' | ' + j.command + (j.metrics ? '\n  ' + measured(j) : '') +

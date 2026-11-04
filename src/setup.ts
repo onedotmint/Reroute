@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { inside, processExec } from './util.js';
 import { PROVIDERS, type Config, type Profile, type ProviderId, type Category } from './types.js';
-import { cloudSummary, presets } from './resources.js';
+import { cloudSummary, defaultPolicy, presets } from './resources.js';
 import { TOOLCHAIN_IMAGE } from './toolchain.js';
 import { defaults, hasLegacy, loadConfig, loadUserConfig, projectRoot, saveConfig, saveUserConfig, userConfigPath, validate } from './config.js';
 import { credentialStatus, saveProviderSecrets, secretFile, secretNames, type SecretMap } from './auth.js';
@@ -31,8 +31,8 @@ const guides: Record<ProviderId, string> = {
   e2b: 'API key: https://e2b.dev/dashboard — credentials from E2B_API_KEY or private Reroute store.',
 };
 
-const managedLimits = { monthlyUsd: '3', maxTaskUsd: '0.5', storageMonthUsd: '0.01', idleMinutes: '5', maxCpu: '8', maxMemory: '16' };
-const billingWarning = 'Credit/balance: unknown; no free credit assumed. Retained storage may still cost money.\nBudgets are local estimates, not hard bill caps; estimates cannot guarantee or prevent provider charges.';
+export const billingWarning = 'Credit/balance: unknown; no free credit assumed. Retained storage may still cost money.\nBudgets are local estimates, not hard bill caps; estimates cannot guarantee or prevent provider charges.';
+export const nextStep = 'Next: Allow remote execution for this project, then Check connection.';
 function numeric(value: string | undefined, label: string, zero = false): number {
   const n = value?.trim() ? Number(value) : NaN;
   if (!Number.isFinite(n) || (zero ? n < 0 : n <= 0)) throw new Error(label + (zero ? ' must be a nonnegative number' : ' must be an explicit positive number'));
@@ -52,20 +52,23 @@ function managedProfile(profile: Partial<Profile>, options: SetupOptions): Parti
   const image = options.image ?? profile.image;
   if (!image?.trim() || /[\0\r\n]/.test(image)) throw new Error('Managed compute requires --image with your toolchain image');
   delete profile.pendingResume; delete profile.snapshot; delete profile.owner; delete profile.cacheVolume;
+  const limits = defaultPolicy(profile.provider as 'daytona' | 'modal');
   return { ...profile, id: 'auto', image, compute, managed: {
+    ...limits,
     authorized: options.authorize === true,
-    maxCpu: numeric(options.maxCpu ?? managedLimits.maxCpu, '--max-cpu'),
-    maxMemoryGiB: numeric(options.maxMemory ?? managedLimits.maxMemory, '--max-memory'),
-    monthlyUsd: numeric(options.monthlyUsd ?? managedLimits.monthlyUsd, '--monthly-usd'),
-    maxTaskUsd: numeric(options.maxTaskUsd ?? managedLimits.maxTaskUsd, '--max-task-usd'),
+    maxCpu: numeric(options.maxCpu ?? String(limits.maxCpu), '--max-cpu'),
+    maxMemoryGiB: numeric(options.maxMemory ?? String(limits.maxMemoryGiB), '--max-memory'),
+    monthlyUsd: numeric(options.monthlyUsd ?? String(limits.monthlyUsd), '--monthly-usd'),
+    maxTaskUsd: numeric(options.maxTaskUsd ?? String(limits.maxTaskUsd), '--max-task-usd'),
     cpuHourUsd: numeric(options.cpuHourUsd, '--cpu-hour-usd (reviewed rate)'),
     memoryGiBHourUsd: numeric(options.memoryHourUsd, '--memory-hour-usd (reviewed GiB rate)'),
-    storageMonthUsd: numeric(options.storageMonthUsd ?? managedLimits.storageMonthUsd, '--storage-month-usd', true),
-    idleMinutes: numeric(options.idleMinutes ?? managedLimits.idleMinutes, '--idle-minutes'),
+    storageMonthUsd: numeric(options.storageMonthUsd ?? String(limits.storageMonthUsd), '--storage-month-usd', true),
+    idleMinutes: numeric(options.idleMinutes ?? String(limits.idleMinutes), '--idle-minutes'),
   } };
 }
 async function managedPrompts(profile: Partial<Profile>, options: SetupOptions): Promise<Partial<Profile>> {
   const modal = profile.provider === 'modal', unit = modal ? 'physical cores (not vCPU)' : 'vCPU';
+  const defaults = defaultPolicy(profile.provider as 'daytona' | 'modal');
   p.note(billingWarning + (modal
     ? '\nModal execution and starter toolchain verified against the real service; broad recovery and billing unverified. Non-preemptible Sandbox rates below, NOT cheaper function rates.\nhttps://modal.com/pricing — CPU $0.00003942/core/sec × 3600; memory $0.00000667/GiB/sec × 3600.'
     : '\nhttps://www.daytona.io/pricing/ — public rates fetched 2026-10-21: vCPU $0.0504/h, memory $0.0162/GiB/h.') +
@@ -81,14 +84,14 @@ async function managedPrompts(profile: Partial<Profile>, options: SetupOptions):
   }
   values.image = answer(await p.text({message:'Toolchain image (must contain your build/test tools)',initialValue:options.image ?? profile.image ?? TOOLCHAIN_IMAGE,
     validate:v=>!v?.trim() || /[\0\r\n]/.test(v) ? 'A toolchain image is required' : undefined}));
-  values.monthlyUsd = await amount('Monthly local estimate budget (USD)', options.monthlyUsd ?? String(profile.managed?.monthlyUsd ?? managedLimits.monthlyUsd));
-  values.maxTaskUsd = await amount('Maximum per-task estimate (USD)', options.maxTaskUsd ?? String(profile.managed?.maxTaskUsd ?? managedLimits.maxTaskUsd));
-  values.cpuHourUsd = await amount('Review CPU rate (USD/'+(modal?'physical-core':'vCPU')+'/hour)', options.cpuHourUsd ?? String(profile.managed?.cpuHourUsd ?? (modal ? 0.141912 : 0.0504)));
-  values.memoryHourUsd = await amount('Review memory rate (USD/GiB/hour)', options.memoryHourUsd ?? String(profile.managed?.memoryGiBHourUsd ?? (modal ? 0.024012 : 0.0162)));
-  values.storageMonthUsd = await amount('Monthly retained storage allowance (USD; may still be charged)', options.storageMonthUsd ?? String(profile.managed?.storageMonthUsd ?? managedLimits.storageMonthUsd), true);
-  values.idleMinutes = await amount('Idle reclaim delay (whole minutes, 1-1440)', options.idleMinutes ?? String(profile.managed?.idleMinutes ?? managedLimits.idleMinutes));
-  values.maxCpu = await amount('Maximum allowed CPU ('+unit+')', options.maxCpu ?? String(profile.managed?.maxCpu ?? managedLimits.maxCpu));
-  values.maxMemory = await amount('Maximum allowed memory (GiB)', options.maxMemory ?? String(profile.managed?.maxMemoryGiB ?? managedLimits.maxMemory));
+  values.monthlyUsd = await amount('Monthly local estimate budget (USD)', options.monthlyUsd ?? String(profile.managed?.monthlyUsd ?? defaults.monthlyUsd));
+  values.maxTaskUsd = await amount('Maximum per-task estimate (USD)', options.maxTaskUsd ?? String(profile.managed?.maxTaskUsd ?? defaults.maxTaskUsd));
+  values.cpuHourUsd = await amount('Review CPU rate (USD/'+(modal?'physical-core':'vCPU')+'/hour)', options.cpuHourUsd ?? String(profile.managed?.cpuHourUsd ?? defaults.cpuHourUsd));
+  values.memoryHourUsd = await amount('Review memory rate (USD/GiB/hour)', options.memoryHourUsd ?? String(profile.managed?.memoryGiBHourUsd ?? defaults.memoryGiBHourUsd));
+  values.storageMonthUsd = await amount('Monthly retained storage allowance (USD; may still be charged)', options.storageMonthUsd ?? String(profile.managed?.storageMonthUsd ?? defaults.storageMonthUsd), true);
+  values.idleMinutes = await amount('Idle reclaim delay (whole minutes, 1-1440)', options.idleMinutes ?? String(profile.managed?.idleMinutes ?? defaults.idleMinutes));
+  values.maxCpu = await amount('Maximum allowed CPU ('+unit+')', options.maxCpu ?? String(profile.managed?.maxCpu ?? defaults.maxCpu));
+  values.maxMemory = await amount('Maximum allowed memory (GiB)', options.maxMemory ?? String(profile.managed?.maxMemoryGiB ?? defaults.maxMemoryGiB));
   return managedProfile(profile, {...values, id:undefined, authorize:false});
 }
 
@@ -292,8 +295,9 @@ async function quickSetup(root: string, config: Config, project: boolean): Promi
         pending.push({ provider, credential: name, values });
       }
     } else p.note('Using saved private credential account: ' + credential + '. This is not a connection check.', provider);
+    const base = defaultPolicy(provider as 'daytona' | 'modal');
     const options: SetupOptions = { preset: 'small', image: TOOLCHAIN_IMAGE,
-      cpuHourUsd: provider === 'modal' ? '0.141912' : '0.0504', memoryHourUsd: provider === 'modal' ? '0.024012' : '0.0162' };
+      cpuHourUsd: String(base.cpuHourUsd), memoryHourUsd: String(base.memoryGiBHourUsd) };
     candidate.profiles = { ...candidate.profiles, [name]: managedProfile({ provider, credential }, options) as Profile };
     added.push(name);
   }

@@ -42,21 +42,23 @@ with tempfile.TemporaryDirectory(prefix='reroute-pi-panel-') as temp:
             until('[Extensions]')
             os.write(master,b'/reroute\r')
             if configured:
-                screen=until('Project remote authorization: NOT authorized')
-                assert 'Config: global' in screen,screen
-                assert 'saved is not authenticated' in screen,screen
+                screen=until('PROJECT NOT AUTHORIZED')
+                assert 'Config: global' not in screen,screen
+                assert '· global' in screen,screen
+                assert 'connection: not checked this session' in screen,screen
                 os.write(master,b'\r')
                 until('No cloud calls made to view this overview.')
-                until('Project remote authorization: NOT authorized')
+                until('PROJECT NOT AUTHORIZED')
                 # Escape closes the next native select without submitting a model prompt.
                 os.write(master,b'\x1b')
                 time.sleep(.2)
             else:
-                until('Global setup recommended')
-                os.write(master,b'\r')
-                shown=until('setup defaults to global scope.')
-                assert 'setup' in shown and '--cwd' in shown,shown
-                assert '--project' not in shown,shown
+                # One render: waiting twice would stall on the already-buffered static menu.
+                shown=until('Advanced terminal setup')
+                assert 'No configuration yet' in shown,shown
+                assert 'Configure in Pi' in shown,shown
+                # No Enter: the first-run menu is a native select and Escape closes it without a model prompt.
+                os.write(master,b'\x1b')
             time.sleep(.2)
             os.write(master,b'/quit\r')
             assert child.wait(timeout=5)==0
@@ -74,7 +76,7 @@ with tempfile.TemporaryDirectory(prefix='reroute-pi-panel-') as temp:
     assert json.loads(config.read_text())==value
     assert not (project/'.reroute.json').exists()
     assert not (base/'NETWORK_ATTEMPT').exists(),'No network/model request is permitted'
-print('Pi native PTY: global setup, overview, close; zero network/model calls')
+print('Pi native PTY: in-panel first-run menu, overview, close; zero network/model calls')
 `;
   const result = spawnSync('python3', ['-c', script, process.execPath,
     process.env.REROUTE_PI_CLI_PATH ?? resolve('node_modules/@earendil-works/pi-coding-agent/dist/cli.js'), resolve('adapters/pi.ts')],

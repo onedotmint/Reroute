@@ -23,13 +23,19 @@ export function projectExecutionHints(root: string, profile: Profile, jobs: Job[
     groups.set(kind, samples);
   }
   const duration = (ms: number) => ms < 1000 ? '<1s' : Math.round(ms / 1000) + 's';
-  return [...groups].filter(([, samples]) => samples.length >= 2).slice(0, 3).map(([kind, samples]) => {
+  // One confirmed run is already evidence: requiring two threw away the cold-start signal the agent needs most.
+  return [...groups].filter(([, samples]) => samples.length >= 1).slice(0, 3).map(([kind, samples]) => {
     const times = samples.map(j => j.metrics!.executionMs!);
     const low = duration(Math.min(...times)), high = duration(Math.max(...times));
     const failures = samples.filter(j => j.code !== 0).length;
     const caches = samples.filter(j => j.cacheWarning === undefined && typeof j.metrics?.cacheHit === 'boolean');
     const cache = caches.length ? `; download archive restored ${caches.filter(j => j.metrics!.cacheHit).length}/${caches.length}` : '';
+    const runs = samples.length === 1 ? '1 confirmed remote run' : samples.length + ' confirmed remote runs';
+    // An all-failure group must not read like a usable path. Route state is stated first, not buried after 'confirmed'.
+    const outcome = failures === samples.length
+      ? `; ALL ${failures} FAILED (nonzero exit): treat the remote path as unproven, not as working`
+      : failures ? `; ${failures} of ${samples.length} exited nonzero` : '; all exited 0';
     // Never put raw commands, paths, errors or output from receipts into model instructions.
-    return `${HISTORY_PREFIX}${kind}/${profile.provider}: ${samples.length} confirmed remote runs, ${low === high ? low : low + '–' + high}; ${failures} nonzero exits${cache}. Context only, not a local-speed comparison.`;
+    return `${HISTORY_PREFIX}${kind}/${profile.provider}: ${runs}, ${low === high ? low : low + '–' + high}${outcome}${cache}. Context only, not a local-speed comparison.`;
   });
 }

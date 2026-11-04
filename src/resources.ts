@@ -5,11 +5,21 @@ import { join } from 'node:path';
 import { activeProfile, listJobs, stateDir, validate } from './config.js';
 import { createProvider } from './providers/index.js';
 import { atomicJson, hash, jsonFile, noSymlink } from './util.js';
-import type { Compute, Config, Job, Profile, Provider } from './types.js';
+import type { CloudPolicy, Compute, Config, Job, Profile, Provider } from './types.js';
 
 export const presets: Record<string, Compute> = {
   small: { cpu: 1, memoryGiB: 2 }, medium: { cpu: 2, memoryGiB: 4 }, large: { cpu: 4, memoryGiB: 8 },
 };
+/** Reviewed per-provider rates. Kept here alone: a duplicated rate silently mis-states the estimate the user approves. */
+const rates: Record<'daytona' | 'modal', { cpuHourUsd: number; memoryGiBHourUsd: number }> = {
+  daytona: { cpuHourUsd: 0.0504, memoryGiBHourUsd: 0.0162 },
+  modal: { cpuHourUsd: 0.141912, memoryGiBHourUsd: 0.024012 },
+};
+/** The single source for a new managed policy: unauthorized until the user explicitly accepts it. */
+export function defaultPolicy(provider: 'daytona' | 'modal'): CloudPolicy {
+  return { authorized: false, maxCpu: 8, maxMemoryGiB: 16, monthlyUsd: 3, maxTaskUsd: 0.5,
+    ...rates[provider], storageMonthUsd: 0.01, idleMinutes: 5 };
+}
 export function recommendCompute(command: string): { compute: Compute; reason: string } {
   return /\bcargo\b/.test(command)
     ? { compute: presets.large!, reason: 'Rust compilation benefits from parallel CPU and linker memory; suggestion only.' }

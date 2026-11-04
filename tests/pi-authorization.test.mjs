@@ -72,7 +72,7 @@ test('explicit canonical project/account/source/scripts/fees confirmation grants
   });
   const ctx = { cwd: alias, hasUI: true, ui: { confirm: async (title, text) => {
     confirmations++;
-    assert.match(title, /Authorize this project/);
+    assert.match(title, /SOURCE UPLOAD — allow remote execution for this project/);
     assert.ok(text.includes('Canonical project root: ' + root));
     assert.match(text, /daytona \/ reviewed-account/);
     assert.match(text, /Source code will be uploaded/);
@@ -117,7 +117,9 @@ test('native onUpdate receives engine stages and the final structured result ret
   assert.match(result.content[0].text, /Measured: source 4 ms; transfer 7 ms \/ 8 B; execution 9 ms/);
   assert.ok(result.content[0].text.includes('pack 2 ms / 6 B; upload 3 ms / 6 B; remote unpack/verify 1/2 ms'));
   assert.ok(result.content[0].text.includes('cache save 5 ms / 9 B; cleanup/release 4/8 ms'));
-  assert.ok(result.content[0].text.includes('cache restore ? ms / ? B'));
+  // Unmeasured stages are omitted entirely: a '?' placeholder costs model context and says nothing.
+  assert.ok(!result.content[0].text.includes('?'), 'no placeholder noise: ' + result.content[0].text.split('\n')[3]);
+  assert.ok(!result.content[0].text.includes('cache restore'), 'an unmeasured stage is omitted, not printed with ?');
 });
 
 test('panel distinguishes saved credentials, session connection, project authorization and local actual task receipts', async t => {
@@ -134,10 +136,10 @@ test('panel distinguishes saved credentials, session connection, project authori
     select: async title => { titles.push(title); return selections.shift(); }, notify: text => notices.push(text),
     confirm: async () => { throw Error('Viewing status cannot authorize or run tasks'); },
   } });
-  assert.match(titles[0], /Credential source: .*saved is not authenticated/);
-  assert.match(titles[0], /Connection \(this session\): not checked this session/);
-  assert.match(titles[0], /Project remote authorization: NOT authorized/);
-  assert.match(titles[0], /Successful actual tasks \(local receipts\): 1/);
+  assert.match(titles[0], /· project/);
+  assert.match(titles[0], /connection: not checked this session/);
+  assert.match(titles[0], /PROJECT NOT AUTHORIZED — remote tasks are refused/);
+  assert.match(titles[0], /1 successful task\(s\)/);
   assert.match(notices[0], /No cloud calls made/);
   assert.ok(notices[1].includes(own));
   assert.ok(!notices.join('\n').includes(foreign));
@@ -145,14 +147,14 @@ test('panel distinguishes saved credentials, session connection, project authori
 
 test('panel grants and revokes without running a task; revocation leaves recorded jobs alone', async t => {
   const { root, config } = await project(t);
-  const selections = ['Authorize project remote execution', 'Revoke project authorization', 'Close'], titles = [];
+  const selections = ['Allow remote execution for this project', 'Revoke project remote execution consent', 'Close'], titles = [];
   let confirmations = 0;
   await panel({ cwd: root, hasUI: true, ui: {
     select: async title => { titles.push(title); return selections.shift(); },
     confirm: async () => { confirmations++; return true; }, notify: () => {},
   } });
-  assert.match(titles[1], /Project remote authorization: authorized/);
-  assert.match(titles[2], /Project remote authorization: NOT authorized/);
+  assert.match(titles[1], /project authorized/);
+  assert.match(titles[2], /PROJECT NOT AUTHORIZED/);
   assert.equal(confirmations, 2);
   assert.equal(await projectAuthorized(root, config), false);
 });
@@ -185,7 +187,7 @@ test('optional smoke requires an independent cost confirmation and project appro
       assert.match(text, /Offline cost estimate: \$[0-9.]+ conservative reservation/);
       assert.match(text, /30 seconds/);
       assert.match(text, /Source is uploaded/);
-    } else assert.match(title, /Authorize this project/);
+    } else assert.match(title, /SOURCE UPLOAD — allow remote execution/);
     return true;
   }, notify: text => notices.push(text) } };
   await smoke(ctx, root, config, async (command, options) => {

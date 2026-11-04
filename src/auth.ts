@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { mkdir, open, lstat, readFile } from 'node:fs/promises';
+import { mkdir, open, lstat, readFile, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { atomicJson, noSymlink } from './util.js';
@@ -20,6 +20,12 @@ export const secretFile = (credential?: string) => {
   return join(folder, 'accounts', credential + '.json');
 };
 
+/** Names of private credential accounts on disk; never returns secret values. */
+export async function savedAccounts(): Promise<string[]> {
+  const dir = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'reroute', 'accounts');
+  const names = await readdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; return []; });
+  return names.filter(name => name.endsWith('.json')).map(name => name.slice(0, -'.json'.length)).filter(name => /^[a-zA-Z0-9._-]+$/.test(name)).sort();
+}
 async function privateDirectory(credential?: string, create = true): Promise<void> {
   const folder = dirname(secretFile(credential));
   await noSymlink(folder);

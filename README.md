@@ -16,7 +16,7 @@ cd /path/to/your-project
 pi
 ~~~
 
-Inside Pi, open `/reroute` → **Configure Daytona / Modal / SSH (masked terminal)** and run the provided command in a terminal. Select your provider, enter masked credentials, accept or customize defaults, and review spending authorization. No Sandbox ID is needed for managed Daytona/Modal. This saves user defaults at `~/.config/reroute/config.json` (`$XDG_CONFIG_HOME/reroute/config.json`); ordinary projects need no `.reroute.json`.
+Inside Pi, open `/reroute`. With no configuration the first screen is **Configure in Pi (recommended, hidden key input)**. Choose **SSH — your own server** (no key, no cost: enter the alias or `user@host` you already use), or Daytona/Modal (review recommended compute/rates, accept or decline spending authorization, then type the API key into the hidden input). Keys are never echoed and go only to `~/.config/reroute/accounts/NAME.json`; SSH stores no key at all and reuses `~/.ssh/config` and ssh-agent. If a key is already saved on this machine, **Use a saved credential account** creates the profile with no terminal and no key entry. This saves user defaults at `~/.config/reroute/config.json` (`$XDG_CONFIG_HOME/reroute/config.json`); ordinary projects need no `.reroute.json`.
 
 Pi owns package installation, loading, updates and removal. There is no handwritten `~/.pi/agent/extensions/reroute.ts` entry. **Global installation and account spending consent do not authorize every project.** The first remote tool call in each project asks permission to upload its source and execute trusted scripts using the selected account. Rejecting it runs nothing. Consent is reusable private local state, not a flag inside project code.
 
@@ -32,11 +32,13 @@ For a historical 0.4.0 Git install, use `pi install git:github.com/onedotmint/Re
 
 The npm package is **`@onedotmint/reroute`**, not the unrelated unscoped `reroute`; the CLI command remains **`reroute`**. The npm example pins this release; check registry availability before installing. [Successful GitHub Actions](https://github.com/onedotmint/Reroute/actions/workflows/verify.yml) also uploads `onedotmint-reroute-0.4.1.tgz` for the **optional standalone CLI**; an uploaded CI artifact does not by itself publish to npm or create a GitHub Release.
 
-### Optional CLI and masked API keys
+### Optional CLI
 
-The `/reroute` Pi screen can create, inspect and edit project profiles without the CLI. For Daytona / Modal / E2B credentials, prefer each provider's native environment or authentication. **Pi's text inputs are not masked**: never type API keys into an ordinary Pi input prompt.
+The `/reroute` Pi screen configures SSH, Daytona and Modal end to end, including hidden key entry, and can create, inspect and edit project profiles without the CLI. SkyPilot, E2B, existing sandbox IDs and custom specifications still use **Advanced terminal setup** (or `reroute setup --advanced`). For Daytona / Modal / E2B credentials, prefer each provider's native environment or authentication.
 
-For masked API-key entry, read-only resource discovery and advanced diagnostics, install the optional CLI from npm. Alternatively, install `./onedotmint-reroute-0.4.1.tgz` from a successful GitHub Actions run:
+**Ordinary Pi text inputs are not masked.** Use the hidden-input onboarding for keys, never a plain `input`/`editor` field; Reroute's own wizard renders only a mask, never displays or logs the value, and supports cursor movement and pasted keys.
+
+For read-only resource discovery and advanced diagnostics, install the optional CLI from npm. Alternatively, install `./onedotmint-reroute-0.4.1.tgz` from a successful GitHub Actions run:
 
 ~~~bash
 npm install -g @onedotmint/reroute@0.4.1
@@ -221,7 +223,7 @@ pi
 
 In setup, press **Space** to select Daytona and/or Modal (Daytona starts selected), then **Enter**. Choose masked credential entry: one API key for Daytona, Token ID + Secret for Modal. Select **Use recommended settings** or **Customize**, choose the default provider, review the rates, and save. Defaults are 1 CPU / 2 GiB, the Node/Rust/Python starter image, $3/month estimated budget **per credential account**, $0.50/task and a 5-minute idle allowance. These are separate account limits, not a combined $3 cap.
 
-Authorization defaults to **No**. Leave it off to save keys/configuration without permitting future creation/start. A credential deferred with “Configure later” cannot be newly authorized by this wizard. Existing profiles and their prior authorizations are preserved. For custom accounts/targets use `setup --advanced`; in Pi, **Manage providers → Configure providers / API keys (masked terminal)** gives the exact installed setup command, including the current project path. Never paste a key into a Pi field.
+Authorization defaults to **No**. Leave it off to save keys/configuration without permitting future creation/start. A credential deferred with “Configure later” cannot be newly authorized by this wizard. Existing profiles and their prior authorizations are preserved. For custom accounts/targets use `setup --advanced`; in Pi, **Advanced terminal setup** gives the exact installed setup command, including the current project path. Never paste a key into an ordinary (unmasked) Pi field.
 
 - Named credentials are in `~/.config/reroute/accounts/NAME.json` (0700 directory, 0600 unencrypted file). A named account **never falls back** to environment/default/native credentials. Unnamed profiles retain legacy environment-first authentication. `reroute credentials --credential NAME` shows sources only; `forget --provider daytona --credential NAME --yes` affects only that saved account/provider.
 - Profiles choose the account explicitly. Marking one as your gift-credit account is a user choice, **not verified credit**. There is no account rotation or automatic registration.

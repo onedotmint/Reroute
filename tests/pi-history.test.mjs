@@ -16,7 +16,7 @@ function job(patch={}){return {id:randomUUID(),project:'/project',profile:{...pr
 test('history uses confirmed execution metrics, reports outcomes/download archives, and never claims speedup',()=>{
  const hints=projectExecutionHints('/project',profile,[job(),job({code:7,metrics:{executionMs:45000,cacheHit:false}})],now);
  assert.equal(hints.length,1);assert.match(hints[0],/2 confirmed remote runs, 45s–60s/);
- assert.match(hints[0],/1 nonzero exits/);assert.match(hints[0],/download archive restored 1\/2/);
+ assert.match(hints[0],/1 of 2 exited nonzero/);assert.match(hints[0],/download archive restored 1\/2/);
  assert.match(hints[0],/not a local-speed comparison/);
 });
 test('missing, old, malformed, unconfirmed and foreign data cannot generate advice',()=>{
@@ -28,10 +28,12 @@ test('missing, old, malformed, unconfirmed and foreign data cannot generate advi
   {project:'/other'},{profile:{...profile,id:'other-host'}},{profile:{...profile,provider:'modal'}},
   {profile:{...profile,credential:'other-account'}},{profile:{...profile,image:'different'}},
   {profile:{...profile,compute:{cpu:4,memoryGiB:8}}},{command:'git status'}, {command:'cargo test && echo done'}]){
-  assert.deepEqual(projectExecutionHints('/project',profile,[valid,job(patch)],now),[],JSON.stringify(patch));
+  // One clean run now clears the threshold, so each corrupt sample must be rejected on its own.
+  assert.deepEqual(projectExecutionHints('/project',profile,[job(patch)],now),[],JSON.stringify(patch));
  }
- assert.deepEqual(projectExecutionHints('/project',profile,[valid],now),[]);
- assert.deepEqual(projectExecutionHints('/project',profile,[valid,valid],now),[]);
+ assert.equal(projectExecutionHints('/project',profile,[valid],now).length,1,'a single clean run is reported');
+ assert.deepEqual(projectExecutionHints('/project',profile,[],now),[]);
+ assert.equal(projectExecutionHints('/project',profile,[valid,valid],now).length,1,'a duplicated id counts once');
 });
 test('at most three bounded suggestions use only recent samples and do not expose raw receipt text',()=>{
  const jobs=[];
