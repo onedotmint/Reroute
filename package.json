@@ -63,7 +63,7 @@
     "audit:dependencies": "node scripts/audit-dependencies.mjs",
     "benchmark": "node tests/benchmark.mjs",
     "verify": "npm run typecheck && npm run build && npm test && npm run smoke",
-    "test:dsh": "node --test tests/dsh.integration.mjs"
+    "test:dsh": "node --test tests/dsh.integration.mjs tests/dsh-ptc.integration.mjs"
   },
   "dependencies": {
     "@clack/prompts": "^1.8.1",

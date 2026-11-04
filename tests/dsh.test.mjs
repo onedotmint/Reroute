@@ -22,7 +22,7 @@ import { name, inject, apply, registerHarness } from '../dist/dsh.js';
 import { runRemote, inspectJob } from '../dist/engine.js';
 import {
   defaults, saveConfig, authorizeProject, projectAuthorized, revokeProject,
-  getJob, saveJob, jobPath,
+  getJob, saveJob, jobPath, loadConfig, saveUserConfig,
 } from '../dist/config.js';
 
 // Component coverage: real Cordis services and native tool pipeline, no model or cloud Provider.
@@ -282,6 +282,93 @@ for (const change of ['cwd', 'read-only', 'plan', 'revoke']) {
     assert.equal(f.approvals.length, 1);
   });
 }
+
+for (const [change, mutate] of [
+  ['local mode', config => { config.mode = 'local'; }],
+  ['routing restrictions', config => { config.local = [['cargo']]; }],
+  ['task categories', config => { config.tasks = ['build']; }],
+  ['timeout', config => { config.timeoutSeconds = 60; }],
+  ['target image', config => { config.profiles.fixture.image = 'changed-image'; }],
+  ['managed authorization', config => { config.profiles.fixture.managed.authorized = false; }],
+  ['task budget', config => { config.profiles.fixture.managed.maxTaskUsd = 0.01; }],
+  ['monthly budget', config => { config.profiles.fixture.managed.monthlyUsd = 0.1; }],
+]) {
+  test(`approval wait rejects changed ${change} even when project consent remains valid`, { timeout: 10000 }, async t => {
+    const entered = Promise.withResolvers(), answer = Promise.withResolvers();
+    t.after(() => answer.resolve('rejected'));
+    const f = await fixture(t, { answer: () => { entered.resolve(); return answer.promise; } });
+    const config = structuredClone(f.config);
+    config.profiles.fixture = {
+      provider: 'modal', id: 'auto', image: 'fixture-image', compute: { cpu: 1, memoryGiB: 2 },
+      managed: { authorized: true, maxCpu: 4, maxMemoryGiB: 8, maxTaskUsd: 1, monthlyUsd: 10,
+        cpuHourUsd: 0.1, memoryGiBHourUsd: 0.01, storageMonthUsd: 0.01, idleMinutes: 5 },
+    };
+    await saveConfig(f.root, config); await authorizeProject(f.root, config);
+    const pending = f.run(); await entered.promise;
+    mutate(config); await saveConfig(f.root, config);
+    assert.equal(await projectAuthorized(f.root, config), true);
+    answer.resolve('allowed-once');
+    const value = canonical(await pending);
+    assert.equal(value.status, 'failed'); assert.equal(value.jobId, null);
+    assert.match(value.reason, /configuration changed during approval.*submit.*approval/i);
+    assert.equal(f.approvals.length, 1); assert.equal(f.executions.length, 0);
+  });
+}
+
+for (const change of ['project root', 'global configuration', 'deleted configuration', 'invalid configuration']) {
+  test(`approval wait re-discovers and reloads ${change} within the original boundary`, async t => {
+    let f;
+    f = await fixture(t, { answer: async () => {
+      if (change === 'project root') {
+        await saveConfig(join(f.root, 'nested'), f.config);
+        await authorizeProject(join(f.root, 'nested'), f.config);
+      }
+      if (change === 'global configuration') await saveUserConfig({ ...f.config, mode: 'local' });
+      if (change === 'deleted configuration') await rm(join(f.root, '.reroute.json'));
+      if (change === 'invalid configuration') await writeFile(join(f.root, '.reroute.json'), '{');
+      return 'allowed-once';
+    } });
+    if (change === 'project root') {
+      await mkdir(join(f.root, 'nested'));
+      await f.ctx.workingDirectory.set(f.caller, join(f.root, 'nested'));
+    }
+    if (change === 'global configuration') {
+      await saveUserConfig(f.config);
+      await writeFile(join(f.root, '.reroute.json'), '{}');
+    }
+    const value = canonical(await f.run());
+    assert.equal(value.status, 'failed'); assert.equal(value.jobId, null);
+    if (change !== 'invalid configuration') assert.match(value.reason, /project root or configuration changed during approval/i);
+    assert.equal(f.approvals.length, 1); assert.equal(f.executions.length, 0);
+  });
+}
+
+for (const source of ['session override', 'configured default']) {
+  test(`approval wait rejects a late allowed-once after ${source} switches to never`, { timeout: 10000 }, async t => {
+    const entered = Promise.withResolvers(), answer = Promise.withResolvers();
+    t.after(() => answer.resolve('rejected'));
+    const f = await fixture(t, { answer: () => { entered.resolve(); return answer.promise; } });
+    const pending = f.run(); await entered.promise;
+    if (source === 'session override') setApprovalPolicy(f.caller.session, 'never');
+    else f.ctx.approval.config = { policy: 'never' };
+    answer.resolve('allowed-once');
+    refused(await pending, /authorization.*approval.*missing/i);
+    assert.equal(f.approvals.length, 1); assert.equal(f.executions.length, 0);
+    assert.equal(await projectAuthorized(f.root, f.config), true);
+  });
+}
+
+test('approval wait permits semantically unchanged configuration with reordered JSON keys', async t => {
+  let f;
+  f = await fixture(t, { answer: async () => {
+    const config = Object.fromEntries(Object.entries(f.config).reverse());
+    await saveConfig(f.root, config);
+    return 'allowed-once';
+  } });
+  canonical(await f.run());
+  assert.equal(f.executions.length, 1);
+  assert.deepEqual(f.executions[0].options.config, (await loadConfig(f.root)).config);
+});
 
 test('cwd, workspace and canonical aliases allow nested local work without widening the original boundary', async t => {
   const f = await fixture(t);

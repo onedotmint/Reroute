@@ -6,7 +6,8 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy';
 import type {} from '@deepseek-ai/dsh-user-approval';
 import type {} from '@deepseek-ai/dsh-plan-mode';
 import { realpath } from 'node:fs/promises';
-import { activeProfile, projectAuthorized, projectRoot } from './config.js';
+import { isDeepStrictEqual } from 'node:util';
+import { activeProfile, loadConfig, projectAuthorized, projectRoot } from './config.js';
 import { runRemote, inspectJob } from './engine.js';
 import { runTool, statusTool } from './tools.js';
 import { inside } from './util.js';
@@ -119,7 +120,13 @@ export function registerHarness(ctx: Context, execute = runRemote, inspect = ins
               const current = await workspace(exec, signal, true);
               if (current.cwd !== scope.cwd || current.boundary !== scope.boundary)
                 throw new Error('Workspace changed during approval; nothing executed');
-              return projectAuthorized(root, config);
+              const latest = await loadConfig(current.cwd, scope.boundary);
+              if (latest.root !== root || !isDeepStrictEqual(latest.config, config))
+                throw new Error('Project root or configuration changed during approval; nothing executed. Submit again for fresh approval.');
+              const authorized = await projectAuthorized(latest.root, config);
+              // The SDK checks policy before waiting for the answerer, not after it.
+              const policy = ctx.approval.overrideOf(session) ?? ctx.approval.config.policy ?? 'ask';
+              return authorized && policy === 'ask';
             },
             onJob: job => {
               recent.set(session, { root: job.project, jobId: job.id });

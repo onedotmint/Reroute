@@ -53,7 +53,7 @@ Earlier Reroute candidates installed `~/.pi/agent/extensions/reroute.ts` globall
 
 ## DeepSeek Harness native plugin — unreleased current build
 
-**WIP checkpoint — do not enable for real projects or paid compute yet.** Two approval-wait policy/configuration races remain open. See [current status and blockers](docs/DEEPSEEK-HARNESS-STATUS.md).
+**WIP checkpoint — do not enable for real projects or paid compute yet.** The two known approval-wait races are fixed with targeted regressions, and real Node PTC cancellation/recovery bridging passed with mock Providers; full acceptance remains pending. See [current status and blockers](docs/DEEPSEEK-HARNESS-STATUS.md).
 
 Pi remains supported, including its existing `/reroute` panel and source-only package loading. The same npm package adds `./dsh` → `dist/dsh.js` and a `dsh.bundle.patch` pointing to `cordis.patch.yml`; Harness registers **only `reroute_run` and `reroute_status`**. No new settings panel, Bash interception or Harness background jobs.
 
