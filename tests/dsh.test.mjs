@@ -7,10 +7,11 @@ import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse } from 'shell-quote';
-import { z } from 'zod';
 import { Context } from '@deepseek-ai/cordis';
+import Agents from '@deepseek-ai/dsh-agent';
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt';
 import Tools, { TOOL_ABORTED } from '@deepseek-ai/dsh-tools';
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native';
 import Sessions, { Session } from '@deepseek-ai/dsh-session';
 import SessionProjections from '@deepseek-ai/dsh-session-projection';
 import FsLocal from '@deepseek-ai/dsh-fs-local';
@@ -60,18 +61,11 @@ async function fixture(t, options = {}) {
   if (options.configured !== false) await saveConfig(root, config);
   if (options.authorized !== false) await authorizeProject(root, config);
   await ctx.plugin(SystemPrompt);
-  await ctx.plugin(Tools, { mode: 'native' });
+  await ctx.plugin(Tools);
+  await ctx.plugin(NativeExecutor);
   await ctx.plugin(Sessions);
   await ctx.plugin(SessionProjections);
-  // The full agent-loop normally owns this projection; the fixture only opens/closes turns.
-  ctx.sessionProjections.register({
-    key: 'turnBoundary', stateVersion: 1,
-    stateSchema: z.object({ openTurnStartSeq: z.number().nullable(), lastStepStartSeq: z.null(), lastStepBoundary: z.null(), lastTurn: z.number() }),
-    init: () => ({ openTurnStartSeq: null, lastStepStartSeq: null, lastStepBoundary: null, lastTurn: 0 }),
-    apply: (state, event) => event.type === 'turn/start'
-      ? { ...state, openTurnStartSeq: event.seq, lastTurn: event.data.turn }
-      : event.type === 'turn/end' ? { ...state, openTurnStartSeq: null } : state,
-  });
+  await ctx.plugin(Agents);
   await ctx.plugin(FsLocal, { cwd: root });
   await ctx.plugin(WorkingDirectory, { defaultDirectory: root });
   await ctx.plugin(SandboxPolicy, { mode: 'workspace-write', workspaceRoot: root });
@@ -96,10 +90,10 @@ async function fixture(t, options = {}) {
     return { id: session.id, session, ctx: ctx.root, inject() {} };
   };
   const caller = agent();
-  const call = (tool, args = {}, who = caller, signal = new AbortController().signal) => ctx.tools.execute({
-    callId: `dsh-${++ordinal}`, name: tool, arguments: args, agent: who ?? undefined,
-    signal: AbortSignal.any([signal, t.signal]),
-  });
+  const call = async (tool, args = {}, who = caller, signal = new AbortController().signal) => (await ctx.tools.execute({
+    calls: [{ type: 'tool-call', id: `dsh-${++ordinal}`, name: tool, arguments: JSON.stringify(args) }],
+    agent: who ?? undefined, signal: AbortSignal.any([signal, t.signal]),
+  })).results[0].result;
   return {
     base, root, config, ctx, plugin, mount, agent, caller, call, approvals, executions,
     run: (args = { command: 'cargo test' }, who = caller, signal) => call('reroute_run', args, who, signal),

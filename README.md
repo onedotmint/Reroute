@@ -6,9 +6,11 @@ Reroute is an on-demand task offloader, not a remote IDE or a synchronization da
 
 **Version: 0.4.2.** Provider management, key repair and saved-account reuse from inside the `/reroute` panel, explicit spending authorization that defaults to No, and the DeepSeek Harness adapter shipped as a **preview** entry point in the same package. See [0.4.2 release notes](docs/RELEASE-0.4.2.md) and the [dependency findings](docs/DEPENDENCY-SECURITY.md). Publication status is determined by [npm](https://www.npmjs.com/package/@onedotmint/reroute), not by a passing build; the matching [GitHub Release](https://github.com/onedotmint/Reroute/releases/tag/v0.4.2) carries the same verified tarball. Global-first installation, reusable defaults, per-project consent and packed source transfer from [0.4.0](docs/RELEASE-0.4.0.md) remain supported. Earlier [real-service acceptance](docs/RELEASE-ACCEPTANCE.md) is historical, not new cloud qualification for this release. Billing and broad fault recovery remain uncertified.
 
+**Current checkout and CI require Node.js 24.9.0 or newer.** Use the latest Node 24 LTS patch (`nvm install` / `nvm use` reads `.nvmrc`). This change is not in the published 0.4.2 package.
+
 ## Install once as a global native Pi package (recommended)
 
-From WSL2/Linux with Pi and Node.js >= 22.19:
+For the published 0.4.2 package, from WSL2/Linux with Pi and Node.js >= 22.19:
 
 ~~~bash
 pi install npm:@onedotmint/reroute@0.4.2
@@ -72,7 +74,7 @@ reroute setup
 reroute authorize --yes
 ~~~
 
-The registry form `dsh plugin --profile web add @onedotmint/reroute` obtains this preview only once npm reports 0.4.2 as available. The preview API is pinned to **DSH `0.2.1-rc.5`**, not all 0.2.x. SDKs are host-provided, not production dependencies. Initial fixture evidence is Linux / Node 24 only, not real-model or paid-cloud acceptance.
+The current checkout targets **DSH `0.2.2-rc.5`** on Node 24, not all 0.2.x. Use the packed checkout above; the published 0.4.2 preview still targets DSH `0.2.1-rc.5`. SDKs are host-provided, not production dependencies. Fixture evidence is Linux / Node 24 only, not real-model or paid-cloud acceptance.
 
 Every new run additionally needs Harness **`allowed-once`** approval. Policy `never` rejects; missing approval service fails closed. Read-only or active plan mode refuses new runs. The model must not perform setup/authorization on the user's behalf. Existing command eligibility, project consent and budget gates remain unchanged.
 
@@ -117,7 +119,7 @@ Managed Sandbox/Volume ownership remains installation + project + profile scoped
 
 ## Provider prerequisites
 
-All execution targets need Linux, Python 3, Bash, a /proc filesystem and your project toolchain. SSH/SkyPilot/E2B and attached cloud targets must already exist. Managed Daytona/Modal can create compute from a reviewed image; `reroute:node-rust-v1` is the starter SDK-built image (Rust stable, Node 22/npm, Python 3). Its historical cloud build/real-toolchain evidence is recorded below; the first build can still take time or fail. pnpm/Yarn/Bun and nonstandard runtimes require a suitable user-reviewed image.
+All execution targets need Linux, Python 3, Bash, a /proc filesystem and your project toolchain. SSH/SkyPilot/E2B and attached cloud targets must already exist. Managed Daytona/Modal can create compute from a reviewed image; `reroute:node-rust-v1` is the starter SDK-built image (Rust stable, Node 22/npm, Python 3). The starter targets remote workloads, not Reroute's host runtime. To build this checkout remotely, choose a reviewed Node 24 image. Its historical cloud build/real-toolchain evidence is recorded below; the first build can still take time or fail. pnpm/Yarn/Bun and nonstandard runtimes require a suitable user-reviewed image.
 
 | Provider | Preexisting setup | Behavior |
 |---|---|---|

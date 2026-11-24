@@ -1,6 +1,6 @@
 # DeepSeek Harness 接入状态检查点
 
-**状态：WIP 预览，尚不可正式启用或用于付费任务。**
+**状态：WIP 预览，尚不可正式启用或用于付费任务。** 当前 checkout 已转向 DSH `0.2.2-rc.5` / Node `>=24.9.0`，新版验证见 [DELIVERY](../DELIVERY.md#unreleased-node-24-and-deepseek-harness-update)。以下保留 0.4.2 历史检查点。
 
 分支：`feat/deepseek-harness-preview`，已合并回主分支并以 **0.4.2** 发布。检查点 `2b1914c` 保存 P1/P2 修复和 PTC 取消恢复验证；0.4.2 只是把该适配器随包分发，**不代表已完成验收**，仍为 WIP 预览。以下内容是发布前的检查点记录，版本号和 tarball 名称保留原样，不是 0.4.2 的重新测量。
 

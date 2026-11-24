@@ -10,9 +10,9 @@ export async function doctor(cwd: string, connect = false) {
   const checks: Record<string,unknown> = {node:process.version,platform:process.platform,project:root,configured:!!config,configurationSource:source??'none',cloudConnections:connect?'requested':'not attempted'};
   checks.environment=await inspectEnvironment(root);
   const [major,minor]=process.versions.node.split('.').map(Number);
-  let ok = process.platform !== 'win32' && (major! > 22 || (major === 22 && minor! >= 19));
+  let ok = process.platform !== 'win32' && (major! > 24 || (major === 24 && minor! >= 9));
   checks.supportedNode=ok;
-  if(!ok)checks.required='Linux or WSL2, Node >=22.19.0';
+  if(!ok)checks.required='Linux or WSL2, Node >=24.9.0';
   const tools = ['git','bash', ...(config && ['ssh','skypilot'].includes(activeProfile(config).provider) ? ['ssh','rsync', ...(activeProfile(config).provider==='skypilot'?['sky']:[])] : [])];
   for (const tool of tools) { const r=await processExec('sh',['-c','command -v '+tool],{timeoutMs:5000}); checks[tool]=r.code===0?'found':'missing'; if(r.code!==0)ok=false; }
   if (!config) checks.next='Run reroute setup once for user defaults. No remote test performed.';

@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, access, copyFile } from 'node:fs/promises';
 import { join, resolve, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
+import reroutePackage from '../package.json' with { type: 'json' };
 
 const execute = promisify(execFile);
 const hostRoot = process.env.REROUTE_TEST_DSH_ROOT;
@@ -16,7 +17,7 @@ test('real Harness installs the packed bundle, calls native/PTC tools and remove
   timeout: 240000,
 }, async t => {
   const manifest = JSON.parse(await readFile(join(hostRoot, 'package.json'), 'utf8'));
-  assert.equal(manifest.version, '0.2.1-rc.5');
+  assert.equal(manifest.version, reroutePackage.engines.dsh);
   const temp = await mkdtemp(join(tmpdir(), 'reroute-dsh-install-'));
   t.after(() => rm(temp, { recursive: true, force: true }));
   const home = join(temp, 'home'), profile = join(home, 'profiles', 'probe'), project = join(temp, 'project');
@@ -28,7 +29,6 @@ test('real Harness installs the packed bundle, calls native/PTC tools and remove
     XDG_CONFIG_HOME: join(temp, 'config'), XDG_STATE_HOME: join(temp, 'state'), XDG_CACHE_HOME: join(temp, 'cache'),
     REROUTE_STATE_DIR: join(temp, 'reroute-state'), npm_config_userconfig: join(temp, 'npmrc'),
     npm_config_globalconfig: join(temp, 'global-npmrc'), npm_config_registry: 'https://registry.npmjs.org/',
-    PROBE_HOST_ROOT: resolve(hostRoot),
   };
   await writeFile(env.npm_config_userconfig, ''); await writeFile(env.npm_config_globalconfig, '');
   const run = async (program, args, cwd = project) => {
@@ -49,12 +49,8 @@ test('real Harness installs the packed bundle, calls native/PTC tools and remove
   const runner = join(temp, 'runner.mjs');
   await writeFile(runner, `
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
-const require = createRequire(join(process.env.PROBE_HOST_ROOT, 'package.json'));
-const { createToolResultMessage } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')).href);
 export const name = 'reroute-installed-checks';
 export const inject = ['tools','sessions','appReady','appExit'];
 export function apply(ctx) {
@@ -70,10 +66,11 @@ async function check(ctx) {
   let index = 0;
   async function call(name, args) {
     const callId = 'installed-' + ++index;
-    session.append('tool/call', { turn: 1, step: 1, callId, name, arguments: JSON.stringify(args) });
-    const result = await ctx.tools.execute({ callId, name, arguments: args, agent, signal: new AbortController().signal });
-    session.append('tool/result', { turn: 1, step: 1, message: createToolResultMessage({ callId, content: result.content, isError: result.isError }) }, { surfaceOp: 'append' });
-    return result;
+    const batch = await ctx.tools.execute({
+      calls: [{ type: 'tool-call', id: callId, name, arguments: JSON.stringify(args) }],
+      agent, log: { turn: 1, step: 1 }, signal: new AbortController().signal,
+    });
+    return batch.results[0].result;
   }
   const checks = ['installed bundle registers both production tools with host SDK'];
   if (process.env.PROBE_MODE === 'native') {
@@ -116,10 +113,15 @@ async function check(ctx) {
   ];
   const results = [];
   for (const mode of ['native', 'ptc']) {
-    await writeFile(join(profile, 'cordis.patch.yml'), JSON.stringify([{ insert: [...baseRows, { id: 'tools', name: '@deepseek-ai/dsh-tools', config: { mode } }] }]));
+    const tools = { id: 'tools', name: '@deepseek-ai/dsh-tools' };
+    const executor = { id: 'tool-executor', name: `@deepseek-ai/dsh-tool-executor-${mode}` };
+    await writeFile(join(profile, 'cordis.patch.yml'), JSON.stringify([{ insert: [...baseRows, tools, executor] }]));
     env.PROBE_MODE = mode; env.PROBE_RESULT = join(temp, mode + '.json');
-    await run(process.execPath, [cli, '--profile', 'probe']);
-    results.push(JSON.parse(await readFile(env.PROBE_RESULT, 'utf8')));
+    const { stdout, stderr } = await run(process.execPath, [cli, '--profile', 'probe']);
+    const result = await readFile(env.PROBE_RESULT, 'utf8').catch(cause => {
+      throw new Error(`Harness ${mode} probe produced no result: ${stderr || stdout}`, { cause });
+    });
+    results.push(JSON.parse(result));
   }
   await run(process.execPath, [cli, 'plugin', '--profile', 'probe', 'remove', '@onedotmint/reroute', '--ignore-scripts']);
   assert.deepEqual(JSON.parse(await readFile(join(profile, 'package.json'), 'utf8')).dsh.profile.bundles, []);

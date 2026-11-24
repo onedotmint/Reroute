@@ -106,6 +106,19 @@ test('authorization flags in project code cannot substitute for a private local 
 });
 
 
+test('doctor reports the supported Node 24 floor', { skip: process.platform === 'win32' }, async t => {
+  const {a}=await fixture(t);
+  const {doctor}=await import('../dist/doctor.js');
+  for (const [version, supported] of [['22.23.4',false], ['24.8.0',false], ['24.9.0',true]]) {
+    await t.test(version, async t => {
+      t.mock.property(process.versions,'node',version);
+      const {checks}=await doctor(a);
+      assert.equal(checks.supportedNode,supported);
+      assert.equal(checks.required,supported ? undefined : 'Linux or WSL2, Node >=24.9.0');
+    });
+  }
+});
+
 test('native-default named account, SSH ports and identity changes never inherit a different target consent',async t=>{
   const {a,config}=await fixture(t);
   const native=structuredClone(config);delete native.profiles.cloud.credential;

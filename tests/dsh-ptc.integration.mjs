@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import reroutePackage from '../package.json' with { type: 'json' };
 import { parse } from 'shell-quote';
 import { inject, registerHarness } from '../dist/dsh.js';
 import { runRemote, inspectJob } from '../dist/engine.js';
@@ -16,15 +17,14 @@ const text = result => result.content.filter(block => block.type === 'text').map
 // Real Node PTC subprocess/bridge and real engine, but never a network Provider or model.
 for (const cancellation of ['subcall', 'outer run_code']) {
   test(`real Node PTC ${cancellation} cancellation drains the allocated Job and recovers via status({})`, {
-    skip: !hostRoot ? 'Set REROUTE_TEST_DSH_ROOT to an existing DSH 0.2.1-rc.5 installation' : false,
+    skip: !hostRoot ? `Set REROUTE_TEST_DSH_ROOT to an existing DSH ${reroutePackage.engines.dsh} installation` : false,
     timeout: 30000,
   }, async t => {
-    assert.equal(JSON.parse(await readFile(join(hostRoot, 'package.json'), 'utf8')).version, '0.2.1-rc.5');
+    assert.equal(JSON.parse(await readFile(join(hostRoot, 'package.json'), 'utf8')).version, reroutePackage.engines.dsh);
     const require = createRequire(join(hostRoot, 'package.json'));
     const load = name => import(pathToFileURL(require.resolve('@deepseek-ai/' + name)).href);
     const { Context } = await load('cordis');
     const { TOOL_ABORTED } = await load('dsh-tools');
-    const { createToolResultMessage } = await load('dsh-llm');
     const ctx = new Context();
     const base = await realpath(await mkdtemp(join(tmpdir(), 'reroute-ptc-cancel-')));
     const root = join(base, 'project'); await mkdir(root);
@@ -43,7 +43,7 @@ for (const cancellation of ['subcall', 'outer run_code']) {
       }
     });
     for (const [name, config] of [
-      ['dsh-system-prompt', {}], ['dsh-tools', { mode: 'ptc' }],
+      ['dsh-system-prompt', {}], ['dsh-tools', {}],
       ['dsh-session', {}], ['dsh-session-projection', {}],
       ['dsh-fs-local', { cwd: root }], ['dsh-working-directory', { defaultDirectory: root }],
       ['dsh-sandbox-policy', { mode: 'workspace-write', workspaceRoot: root }],
@@ -51,6 +51,7 @@ for (const cancellation of ['subcall', 'outer run_code']) {
       ['dsh-subprocess-local', {}], ['dsh-sandbox-local', {}],
       ['dsh-ptc-runtime-node', { timeoutMs: 10000, maxTimeoutMs: 20000 }],
     ]) await ctx.plugin((await load(name)).default, config);
+    await ctx.plugin(await load('dsh-tool-executor-ptc'));
     const config = { ...defaults(), active: 'fixture', profiles: {
       fixture: { provider: 'ssh', id: 'fixture.invalid', root: '/tmp/reroute-ptc-fixture' },
     } };
@@ -96,12 +97,11 @@ for (const cancellation of ['subcall', 'outer run_code']) {
     let index = 0;
     async function call(code, signal = new AbortController().signal) {
       const callId = 'ptc-cancel-' + ++index, args = { description: 'Isolated Reroute cancellation verification', code };
-      session.append('tool/call', { turn: 1, step: 1, callId, name: 'run_code', arguments: JSON.stringify(args) });
-      const result = await ctx.tools.execute({ callId, name: 'run_code', arguments: args, agent, signal: AbortSignal.any([signal, t.signal]) });
-      session.append('tool/result', { turn: 1, step: 1,
-        message: createToolResultMessage({ callId, content: result.content, isError: result.isError }),
-      }, { surfaceOp: 'append' });
-      return result;
+      const batch = await ctx.tools.execute({
+        calls: [{ type: 'tool-call', id: callId, name: 'run_code', arguments: JSON.stringify(args) }],
+        agent, log: { turn: 1, step: 1 }, signal: AbortSignal.any([signal, t.signal]),
+      });
+      return batch.results[0].result;
     }
     let settled = false;
     const pending = call(`
@@ -126,8 +126,8 @@ for (const cancellation of ['subcall', 'outer run_code']) {
     } else {
       assert.equal(result.isError, true, text(result));
       assert.equal(result.value, undefined);
-      assert.equal(result.error.info.code, 'CODE_RUN_FAILED');
-      assert.match(text(result), /code run failed \(abort\)/);
+      assert.equal(result.error.info.code, TOOL_ABORTED);
+      assert.match(text(result), /tool call aborted/);
     }
     const cancelled = dispatches.find(event => event.data.name === 'reroute_run');
     assert.ok(cancelled, 'cancelled nested dispatch is logged before run_code settles');

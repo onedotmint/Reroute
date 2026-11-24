@@ -4,7 +4,7 @@
 
 ## Compatibility and packaging
 
-The supported preview target is **`@deepseek-ai/dsh@0.2.1-rc.5`**. Pin this version: master, alpha, other 0.2.x releases, Desktop and Windows are not interchangeable compatibility promises. Initial isolated fixture evidence is limited to **Linux / Node 24**. The general Reroute CLI/Pi Node requirement does not establish Harness compatibility.
+The current checkout targets **`@deepseek-ai/dsh@0.2.2-rc.5`** with **Node.js >= 24.9.0**. The published 0.4.2 package still targets `0.2.1-rc.5`. Pin the host that matches the package or checkout: alpha, other 0.2.x releases, Desktop and Windows are not interchangeable. Fixture evidence is limited to **Linux / Node 24**.
 
 One npm package, `@onedotmint/reroute`, serves both hosts:
 
@@ -17,7 +17,7 @@ The [feasibility investigation](DEEPSEEK-HARNESS-FEASIBILITY.md) records earlier
 
 ## Install the current build
 
-Use an existing DSH `0.2.1-rc.5` installation and a source checkout with development dependencies installed. Build and pack **this checkout**, not a historical registry tarball:
+Use an existing DSH `0.2.2-rc.5` installation and a source checkout with development dependencies installed. Build and pack **this checkout**, not a historical registry tarball:
 
 ~~~bash
 cd /path/to/Reroute
@@ -102,9 +102,9 @@ A timeout, disconnect, invalid receipt or remote `unknown` does not prove termin
 
 The execution signal is passed through to Reroute; owned cleanup is awaited. Cancellation does not authorize ignoring the signal to preserve a successful return value.
 
-When a Job ID has been allocated, cancellation's **native text retains that ID**. DSH `0.2.1-rc.5` nevertheless removes the canonical value on cancellation: PTC code sees a cancellation error, not the returned run object. Therefore Harness adds `reroute_status({})`, resolving the latest allocated Reroute Job ID associated with the **current live Session**, then applying the normal current-project ownership checks. It is not an all-session persistent history lookup; no allocated ID means no implicit recovery.
+When a Job ID has been allocated, cancellation's **native text retains that ID**. DSH removes the canonical value on cancellation: PTC code sees a cancellation error, not the returned run object. Therefore Harness adds `reroute_status({})`, resolving the latest allocated Reroute Job ID associated with the **current live Session**, then applying the normal current-project ownership checks. It is not an all-session persistent history lookup; no allocated ID means no implicit recovery.
 
-The real Node PTC bridge has fixture coverage for both cancellation boundaries: cancelling only the nested Reroute call raises `ToolCallError` without a Job value; cancelling the outer `run_code` returns `CODE_RUN_FAILED` with an `abort` diagnostic. The nested dispatch log retains Reroute’s annotated Job ID, while a fresh PTC call in the same live Session can recover it with `tools.reroute_status({})`. Tests await mock Provider cleanup and verify one execution with no local retry; they do not prove actual cloud termination.
+The real Node PTC bridge has fixture coverage for both cancellation boundaries: cancelling only the nested Reroute call raises `ToolCallError` without a Job value; cancelling the outer `run_code` returns the native `ABORTED` outcome on DSH `0.2.2-rc.5`. The nested dispatch log retains Reroute’s annotated Job ID, while a fresh PTC call in the same live Session can recover it with `tools.reroute_status({})`. Tests await mock Provider cleanup and verify one execution with no local retry; they do not prove actual cloud termination.
 
 Reloading/unloading the plugin or restarting Harness loses that in-memory association. Recover with an explicit `reroute_status({ jobId: "..." })`; the user can find the ID via `reroute jobs` in the project. Existing private receipts persist independently of this convenience mapping. After cwd/project changes, `{}` must not expose another project's job.
 
