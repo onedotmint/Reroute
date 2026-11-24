@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22', '24']
+        node: ['24']
         npm: ['11.21.1', '12.2.1']
     env:
       REROUTE_LIVE: '0'
@@ -55,15 +55,26 @@ jobs:
       - name: Real SSH, rsync, Pi, artifacts and compiler-cache acceptance
         run: npm run test:ssh
       - name: Real Pi-native Git project install, trust, /reroute loader and removal
-        if: github.event_name == 'push' && github.repository == 'onedotmint/Reroute' && matrix.node == '22' && matrix.npm == '11.21.1'
+        if: github.event_name == 'push' && github.repository == 'onedotmint/Reroute' && matrix.npm == '11.21.1'
         env:
           REROUTE_GIT_COMMIT: ${{ github.sha }}
         run: node scripts/verify-pi-git.mjs
       - name: Measure local input preparation
         run: npm run benchmark
+      - name: Real DSH bundle, native/PTC calls, cancellation and removal
+        if: matrix.npm == '11.21.1'
+        run: |
+          # The DSH workspace sandbox can hide /tmp, including the PTC worker script.
+          host=$(mktemp -d "$HOME/reroute-dsh-host.XXXXXXXX")
+          trap 'rm -rf -- "$host"' EXIT
+          version=$(node -p 'require("./package.json").engines.dsh')
+          npm install --prefix "$host" --no-package-lock --no-save --ignore-scripts --no-audit --no-fund \
+            "@deepseek-ai/dsh@$version" @pnpm/exe.linux-x64@12.16.1
+          REROUTE_TEST_DSH_ROOT="$host/node_modules/@deepseek-ai/dsh" \
+            REROUTE_TEST_PNPM="$host/node_modules/@pnpm/exe.linux-x64/pnpm" npm run test:dsh
       - name: Pack and independently install this commit
         env:
-          REROUTE_TEST_PI_VERSION: ${{ matrix.node == '22' && '1.4.0' || '1.6.0' }}
+          REROUTE_TEST_PI_VERSION: ${{ matrix.npm == '11.21.1' && '1.4.0' || '1.6.0' }}
         run: npm run check:package
       - name: Upload verified installer and evidence
         if: always()
@@ -86,7 +97,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22', '24']
+        node: ['24']
     env:
       REROUTE_LIVE: '0'
       PI_OFFLINE: '1'
