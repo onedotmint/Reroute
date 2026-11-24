@@ -32,6 +32,8 @@ assert.deepEqual(loaded.errors, []);
 assert.equal(loaded.extensions.length, 1);
 const extension = loaded.extensions[0];
 assert.deepEqual([...extension.tools.keys()], ['reroute_run', 'reroute_status']);
+assert.deepEqual(extension.tools.get('reroute_run').definition.parameters.required, ['command']);
+assert.deepEqual(extension.tools.get('reroute_status').definition.parameters.required, ['jobId']);
 assert.ok(extension.commands.has('reroute'));
 assert.equal(extension.tools.has('bash'), false);
 assert.equal(extension.handlers.has('user_bash'), false);

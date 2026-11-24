@@ -63,7 +63,7 @@ jobs:
         run: npm run benchmark
       - name: Pack and independently install this commit
         env:
-          REROUTE_TEST_PI_VERSION: '1.4.0'
+          REROUTE_TEST_PI_VERSION: ${{ matrix.node == '22' && '1.4.0' || '1.6.0' }}
         run: npm run check:package
       - name: Upload verified installer and evidence
         if: always()
