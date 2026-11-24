@@ -2,6 +2,8 @@
 
 ## Scope and decisions
 
+**Unreleased Pi maintenance:** the development lock tests Pi Coding Agent 1.6.0 (with Pi AI 1.6.0 transitively). The adapter imports `typebox` from the host rather than through Pi AI. The standalone CLI still installs neither the Pi SDK nor `typebox`; CI checks independent Pi 1.4.0 and 1.6.0 installs. The audit results below describe the release at the time of review, not the current dependency tree.
+
 The governance change in PR #5 kept `@onedotmint/reroute` at **0.4.0**, as one CLI + Pi extension package, without publishing it. The separately authorized 0.4.1 patch prepared these fixes for npm distribution, and [0.4.2](RELEASE-0.4.2.md) ships them unchanged. Neither change alters credentials/configuration formats or authorizes cloud work. All cloud compatibility evidence for this patch is offline contract/type checking, not a new paid/live-service qualification.
 
 - **Repository:** `package-lock.json` v3, committed; development and CI use `npm ci --ignore-scripts`. No floating CI dependency resolution for Reroute's own tree.

@@ -1,5 +1,5 @@
 import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { Type } from '@earendil-works/pi-ai';
+import { Type } from 'typebox';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

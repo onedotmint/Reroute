@@ -4,8 +4,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 const source = JSON.parse(await readFile('package.json', 'utf8'));
-// Keep the locked 1.1 development contract; test current independently installed hosts too.
-const hostVersion = process.env.REROUTE_TEST_PI_VERSION ?? '1.4.0';
+const hostVersion = process.env.REROUTE_TEST_PI_VERSION ?? '1.6.0';
 assert.match(hostVersion, /^\d+\.\d+\.\d+$/, 'Use an exact Pi host test version');
 const output = resolve('.artifacts');
 await mkdir(output, { recursive: true });
@@ -63,7 +62,7 @@ try {
     const pkg = JSON.parse(await readFile(join(packageDir, 'package.json'), 'utf8'));
     assert.equal(pkg.name, source.name);
     assert.equal(pkg.version, source.version);
-    for (const name of ['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai', ...Object.keys(source.peerDependencies).filter(name => name.startsWith('@deepseek-ai/')), '@google/genai', 'esbuild', 'typescript']) {
+    for (const name of ['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai', ...Object.keys(source.peerDependencies).filter(name => name.startsWith('@deepseek-ai/')), '@google/genai', 'esbuild', 'typebox', 'typescript']) {
       await assert.rejects(access(join(prefix, 'node_modules', name)), { code: 'ENOENT' }, `Unexpected production dependency: ${name}`);
     }
     for (const lock of ['npm-shrinkwrap.json', 'package-lock.json']) await assert.rejects(access(join(packageDir, lock)), { code: 'ENOENT' });
